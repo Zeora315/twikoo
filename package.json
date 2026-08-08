@@ -1,1 +1,9 @@
-{ "dependencies": { "twikoo-vercel": "1.7.14" } }
+{
+  "scripts": {
+    "demo": "node scripts/local-demo-server.js"
+  },
+  "dependencies": {
+    "mongodb": "^6.8.0",
+    "twikoo-vercel": "1.7.14"
+  }
+}

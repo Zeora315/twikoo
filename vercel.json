@@ -1,5 +1,9 @@
 {
   "rewrites": [
+    { "source": "/user-center", "destination": "api/index" },
+    { "source": "/user-center/:path*", "destination": "api/index" },
+    { "source": "/admin", "destination": "api/index" },
+    { "source": "/admin/:path*", "destination": "api/index" },
     { "source": "/(.*)", "destination": "api/index" }
   ]
 }

@@ -1,0 +1,112 @@
+<!doctype html>
+<!--
+THESIS: The comment backend stays invisible while identity work happens inside the site's own front-end user center; this refuses a separate operations dashboard.
+OWN-WORLD: Airy personal-center cards, soft blue-white surface, no site nav, rounded profile slab, role badge beside the name, and settings opened in focused dialogs.
+STORY: A visitor logs in or registers, sees their public identity, edits profile links/password/notifications in popups, and sees admin management only when their role allows it.
+FIRST VIEWPORT: Large profile card centered near the top, name and admin badge on one line, UID/email/joined metadata below, then account action tiles.
+FORM: Front-end account hub matched to the reference screenshot, with Twikoo admin status treated as a private user role label.
+-->
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Twikoo 用户中心 Demo</title>
+    <link rel="stylesheet" href="/user-center/styles.css" />
+  </head>
+  <body>
+    <main class="page-shell">
+      <section id="authView" class="auth-card hidden" aria-labelledby="authTitle">
+        <h1 id="authTitle" class="site-name">安和鱼</h1>
+          <form id="authEmailForm" class="panel-form auth-step">
+            <label class="field">
+              <span>邮箱</span>
+              <input id="authEmailInput" name="email" type="email" required autocomplete="email" placeholder="zeora315@foxmail.com" />
+            </label>
+            <button id="authNextBtn" class="primary-btn" type="submit">下一步</button>
+          </form>
+
+          <form id="authPasswordForm" class="panel-form auth-step hidden">
+            <label class="field">
+              <span>密码</span>
+              <input name="password" type="password" required autocomplete="current-password" />
+            </label>
+            <div class="form-actions">
+              <button class="primary-btn" type="submit">登录</button>
+              <button class="ghost-btn" type="button" data-back-email>上一步</button>
+            </div>
+          </form>
+
+          <form id="authRegisterForm" class="panel-form auth-step hidden">
+            <label class="field">
+              <span>用户名</span>
+              <input name="username" required minlength="3" maxlength="32" autocomplete="username" placeholder="new_user" />
+            </label>
+            <label class="field">
+              <span>显示名称</span>
+              <input name="displayName" maxlength="64" autocomplete="name" placeholder="你的昵称" />
+            </label>
+            <label class="field">
+              <span>密码</span>
+              <input name="password" type="password" required minlength="8" autocomplete="new-password" placeholder="至少 8 位" />
+            </label>
+            <div class="form-actions">
+              <button class="primary-btn" type="submit">注册并进入</button>
+              <button class="ghost-btn" type="button" data-back-email>上一步</button>
+            </div>
+          </form>
+          <p class="auth-switch" id="authSwitchText">
+            没有账号？<button id="authSwitchBtn" type="button" data-auth-mode="register">注册</button>
+          </p>
+      </section>
+
+      <section id="centerView" class="user-center hidden" aria-label="用户中心">
+        <section class="profile-hero">
+          <div id="profileAvatar" class="profile-avatar" aria-hidden="true">Z</div>
+          <div class="profile-copy">
+            <div class="name-row">
+              <h1 id="profileName">zeora</h1>
+              <span id="roleBadge" class="role-badge hidden">管理员</span>
+            </div>
+            <div class="meta-row">
+              <span id="profileUid" class="meta-pill">UID: 7PLg</span>
+              <span id="profileJoined" class="meta-pill">加入于 2026年8月8日</span>
+            </div>
+            <p id="profileEmail" class="mail-line">zeora315@foxmail.com</p>
+          </div>
+        </section>
+
+        <section class="action-grid" aria-label="账号操作">
+          <button class="action-card" type="button" data-panel="edit">
+            <span class="action-icon">笔</span>
+            <span><strong>编辑资料</strong><small>修改个人信息</small></span>
+            <i aria-hidden="true">›</i>
+          </button>
+          <button class="action-card" type="button" data-panel="password">
+            <span class="action-icon">锁</span>
+            <span><strong>修改密码</strong><small>更改登录密码</small></span>
+            <i aria-hidden="true">›</i>
+          </button>
+          <button class="action-card" type="button" data-panel="notice">
+            <span class="action-icon">铃</span>
+            <span><strong>通知设置</strong><small>管理通知偏好</small></span>
+            <i aria-hidden="true">›</i>
+          </button>
+          <button id="adminCard" class="action-card hidden" type="button" data-panel="admin">
+            <span class="action-icon action-icon--admin">管</span>
+            <span><strong>管理员面板</strong><small>管理注册用户</small></span>
+            <i aria-hidden="true">›</i>
+          </button>
+          <button id="logoutBtn" class="action-card" type="button">
+            <span class="action-icon">退</span>
+            <span><strong>退出登录</strong><small>安全退出当前账号</small></span>
+            <i aria-hidden="true">›</i>
+          </button>
+        </section>
+      </section>
+    </main>
+
+    <div id="modalRoot" class="modal-root hidden" aria-live="polite"></div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="/user-center/app.js" defer></script>
+  </body>
+</html>
