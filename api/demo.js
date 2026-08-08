@@ -4,6 +4,15 @@ const COLLECTION_NAME = process.env.DEMO_USERS_COLLECTION || 'twikoo_demo_users'
 const DB_NAME = process.env.DEMO_MONGODB_DB || undefined;
 const PASSWORD_ITERATIONS = 120000;
 const MAX_AVATAR_LENGTH = 240000;
+const DEFAULT_ALLOWED_ORIGINS = [
+  'https://blog.zeora.top',
+  'https://blog.315996.com',
+  'http://blog.315996.com',
+  'http://localhost:4000',
+  'http://127.0.0.1:4000',
+  'http://localhost:4011',
+  'http://127.0.0.1:4011',
+];
 
 const memoryStore = global.__twikooUserDemoStore || {
   users: [],
@@ -27,6 +36,27 @@ function send(res, status, payload) {
   res.setHeader('content-type', 'application/json; charset=utf-8');
   res.setHeader('cache-control', 'no-store');
   res.end(JSON.stringify(payload));
+}
+
+function allowedOrigins() {
+  return (process.env.DEMO_ALLOWED_ORIGINS || DEFAULT_ALLOWED_ORIGINS.join(','))
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+}
+
+function setCorsHeaders(req, res) {
+  const origin = req.headers.origin;
+  if (!origin) return;
+
+  const origins = allowedOrigins();
+  if (!origins.includes('*') && !origins.includes(origin)) return;
+
+  res.setHeader('access-control-allow-origin', origins.includes('*') ? '*' : origin);
+  res.setHeader('access-control-allow-methods', 'GET,POST,OPTIONS');
+  res.setHeader('access-control-allow-headers', 'content-type,x-admin-token');
+  res.setHeader('access-control-max-age', '86400');
+  res.setHeader('vary', 'Origin');
 }
 
 function getRequestUrl(req) {
@@ -497,6 +527,8 @@ async function handle(req, res) {
 }
 
 module.exports = async function demoUsersApi(req, res) {
+  setCorsHeaders(req, res);
+
   try {
     await handle(req, res);
   } catch (error) {
