@@ -253,7 +253,7 @@ async function getMongoCollection() {
   if (!mongoIndexesReady) {
     await Promise.all([
       collection.createIndex({ id: 1 }, { unique: true }),
-      collection.createIndex({ uid: 1 }, { unique: true, sparse: true }),
+      collection.createIndex({ uid: 1 }, { unique: true }),
       collection.createIndex({ emailLower: 1 }, { unique: true }),
       collection.createIndex({ usernameLower: 1 }, { unique: true }),
       collection.createIndex({ role: 1 }),
