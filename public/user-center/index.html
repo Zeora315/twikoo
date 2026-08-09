@@ -25,6 +25,17 @@ FORM: Front-end account hub matched to the reference screenshot, with Twikoo adm
             <button id="authNextBtn" class="primary-btn" type="submit">下一步</button>
           </form>
 
+          <form id="authCodeForm" class="panel-form auth-step hidden">
+            <label class="field">
+              <span>邮箱验证码</span>
+              <input name="code" inputmode="numeric" pattern="\d{6}" maxlength="6" required autocomplete="one-time-code" placeholder="6 位验证码" />
+            </label>
+            <div class="form-actions">
+              <button class="primary-btn" type="submit">确认登录</button>
+              <button class="ghost-btn" type="button" data-back-email>上一步</button>
+            </div>
+          </form>
+
           <form id="authPasswordForm" class="panel-form auth-step hidden">
             <label class="field">
               <span>密码</span>

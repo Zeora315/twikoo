@@ -140,15 +140,7 @@ p {
   border: 0;
   padding: 0 18px;
   font-weight: 900;
-  transition: transform 160ms ease, background 160ms ease, box-shadow 160ms ease;
-}
-
-.primary-btn:hover,
-.secondary-btn:hover,
-.ghost-btn:hover,
-.danger-btn:hover,
-.action-card:hover {
-  transform: translateY(-2px);
+  transition: background 160ms ease, box-shadow 160ms ease, border-color 160ms ease, color 160ms ease;
 }
 
 .primary-btn {
@@ -284,7 +276,7 @@ p {
   color: var(--text);
   padding: 26px 34px;
   text-align: left;
-  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+  transition: box-shadow 160ms ease, border-color 160ms ease;
 }
 
 .action-card:hover {
@@ -325,6 +317,137 @@ p {
   color: #717781;
   font-size: 38px;
   font-style: normal;
+}
+
+.comment-auth-panel {
+  display: grid;
+  gap: 18px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--card);
+  box-shadow: var(--shadow);
+  padding: 24px;
+}
+
+.comment-auth-copy h2 {
+  margin: 0 0 6px;
+  color: var(--ink);
+  font-size: 28px;
+  line-height: 1.15;
+}
+
+.comment-auth-copy p,
+.comment-auth-account {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.permission-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.permission-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  border-radius: 14px;
+  background: #f6f8fd;
+  color: #4a505b;
+  padding: 10px 12px;
+  font-weight: 800;
+}
+
+.permission-list li::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--blue);
+  box-shadow: 0 0 0 5px rgba(36, 72, 255, 0.1);
+  flex: none;
+}
+
+.authorize-login-btn {
+  width: 100%;
+  background: var(--ink);
+  box-shadow: none;
+}
+
+.authorize-login-btn:hover {
+  background: #1f2228;
+}
+
+body.is-comment-auth {
+  background: #f6f8fd;
+}
+
+body.is-comment-auth .page-shell {
+  width: min(620px, calc(100vw - 32px));
+  margin-bottom: 30px;
+  padding-top: clamp(24px, 6vh, 48px);
+}
+
+body.is-comment-auth .auth-card {
+  margin: 0 auto;
+  border-radius: 22px;
+  box-shadow: 0 18px 42px rgba(43, 57, 90, 0.08);
+}
+
+body.is-comment-auth .user-center {
+  gap: 16px;
+}
+
+body.is-comment-auth .profile-hero {
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 18px;
+  min-height: auto;
+  padding: 22px;
+  border-radius: 22px;
+}
+
+body.is-comment-auth .profile-avatar {
+  width: 84px;
+  height: 84px;
+  border-width: 4px;
+  font-size: 28px;
+}
+
+body.is-comment-auth .name-row {
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+body.is-comment-auth .name-row h1 {
+  font-size: clamp(26px, 6vw, 34px);
+}
+
+body.is-comment-auth .role-badge {
+  min-height: 30px;
+  border-radius: 14px;
+  padding: 3px 12px;
+  font-size: 13px;
+}
+
+body.is-comment-auth .meta-row {
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+body.is-comment-auth .meta-pill {
+  min-height: 28px;
+  padding: 3px 9px;
+  font-size: 13px;
+}
+
+body.is-comment-auth .mail-line {
+  font-size: 14px;
+  overflow-wrap: anywhere;
 }
 
 .modal-root {
@@ -627,5 +750,20 @@ p {
     display: block;
     overflow-x: auto;
     white-space: nowrap;
+  }
+
+  body.is-comment-auth .profile-hero {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    text-align: center;
+  }
+
+  body.is-comment-auth .name-row,
+  body.is-comment-auth .meta-row {
+    justify-content: center;
+  }
+
+  body.is-comment-auth .comment-auth-panel {
+    padding: 20px;
   }
 }

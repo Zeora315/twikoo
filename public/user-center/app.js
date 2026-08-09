@@ -1,11 +1,26 @@
+const SESSION_TOKEN_KEY = 'twikooDemoSessionToken';
+const params = new URLSearchParams(window.location.search);
+
+function normalizeOrigin(value) {
+  try {
+    return value ? new URL(value).origin : '';
+  } catch (error) {
+    return '';
+  }
+}
+
 const state = {
   currentUser: null,
   credentials: null,
+  sessionToken: localStorage.getItem(SESSION_TOKEN_KEY) || '',
   users: [],
   authMode: 'login',
   authEmail: '',
   adminProtected: false,
   adminToken: localStorage.getItem('twikooDemoAdminToken') || '',
+  commentAuth: params.get('comment_auth') === '1',
+  parentOrigin: normalizeOrigin(params.get('origin')),
+  siteName: params.get('site') || '',
   filter: { query: '', role: 'all', status: 'all' },
 };
 
@@ -15,6 +30,7 @@ const els = {
   authSwitchText: document.querySelector('#authSwitchText'),
   authSwitchBtn: document.querySelector('#authSwitchBtn'),
   authEmailForm: document.querySelector('#authEmailForm'),
+  authCodeForm: document.querySelector('#authCodeForm'),
   authPasswordForm: document.querySelector('#authPasswordForm'),
   authRegisterForm: document.querySelector('#authRegisterForm'),
   authEmailInput: document.querySelector('#authEmailInput'),
@@ -119,11 +135,15 @@ function setAuthMode(mode) {
   state.authMode = mode;
   state.authEmail = '';
   els.authEmailForm.classList.remove('hidden');
+  els.authCodeForm.classList.add('hidden');
   els.authPasswordForm.classList.add('hidden');
   els.authRegisterForm.classList.add('hidden');
-  els.authSwitchText.firstChild.textContent = mode === 'login' ? '没有账号？' : '已有账号？';
-  els.authSwitchBtn.textContent = mode === 'login' ? '注册' : '登录';
-  els.authSwitchBtn.dataset.authMode = mode === 'login' ? 'register' : 'login';
+  els.authSwitchText.classList.toggle('hidden', state.commentAuth);
+  if (!state.commentAuth) {
+    els.authSwitchText.firstChild.textContent = mode === 'login' ? '没有账号？' : '已有账号？';
+    els.authSwitchBtn.textContent = mode === 'login' ? '注册' : '登录';
+    els.authSwitchBtn.dataset.authMode = mode === 'login' ? 'register' : 'login';
+  }
   requestAnimationFrame(() => els.authEmailInput.focus());
 }
 
@@ -132,9 +152,30 @@ function makeUsernameFromEmail(email) {
   return localPart.replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 32).padEnd(3, '0');
 }
 
-function showPasswordStep() {
+async function requestCodeStep(submitter) {
+  if (submitter) submitter.disabled = true;
+  try {
+    await api('requestCode', { method: 'POST', body: { email: state.authEmail } });
+    els.authEmailForm.classList.add('hidden');
+    els.authCodeForm.classList.remove('hidden');
+    els.authPasswordForm.classList.add('hidden');
+    els.authRegisterForm.classList.add('hidden');
+    els.authCodeForm.code.focus();
+    showToast('验证码已发送，请检查邮箱。');
+  } finally {
+    if (submitter) submitter.disabled = false;
+  }
+}
+
+async function showPasswordStep(submitter) {
   state.authEmail = els.authEmailInput.value.trim().toLowerCase();
+  if (state.commentAuth) {
+    await requestCodeStep(submitter);
+    return;
+  }
+
   els.authEmailForm.classList.add('hidden');
+  els.authCodeForm.classList.add('hidden');
   if (state.authMode === 'login') {
     els.authPasswordForm.classList.remove('hidden');
     els.authRegisterForm.classList.add('hidden');
@@ -152,6 +193,7 @@ async function api(action, options = {}) {
   const headers = {};
   const fetchOptions = { method: options.method || 'GET', headers };
 
+  if (state.sessionToken) headers['x-session-token'] = state.sessionToken;
   if (state.adminToken) headers['x-admin-token'] = state.adminToken;
   if (options.body) {
     headers['content-type'] = 'application/json';
@@ -177,6 +219,7 @@ function updateShell() {
   if (!user) {
     els.authView.classList.remove('hidden');
     els.centerView.classList.add('hidden');
+    document.querySelector('#commentAuthPanel')?.remove();
     closeModal();
     return;
   }
@@ -190,6 +233,56 @@ function updateShell() {
   els.profileEmail.textContent = user.email;
   els.roleBadge.classList.toggle('hidden', user.role !== 'admin');
   els.adminCard.classList.toggle('hidden', user.role !== 'admin');
+  els.actionGrid.classList.toggle('hidden', state.commentAuth);
+  if (state.commentAuth) {
+    renderCommentAuthorization();
+  } else {
+    document.querySelector('#commentAuthPanel')?.remove();
+  }
+}
+
+function renderCommentAuthorization() {
+  let panel = document.querySelector('#commentAuthPanel');
+  if (!panel) {
+    panel = document.createElement('section');
+    panel.id = 'commentAuthPanel';
+    panel.className = 'comment-auth-panel';
+    document.querySelector('.profile-hero')?.after(panel);
+  }
+
+  const user = state.currentUser;
+  panel.innerHTML = `
+    <div class="comment-auth-copy">
+      <h2>授权评论区</h2>
+      <p>${escapeHtml(state.siteName || '当前站点')} 将使用你的公开资料完成评论。</p>
+    </div>
+    <ul class="permission-list" aria-label="授权权限">
+      <li>获取用户基本信息</li>
+      <li>发送通知</li>
+      <li>获取邮箱地址</li>
+    </ul>
+    <button class="primary-btn authorize-login-btn" type="button" data-comment-authorize>确认登录</button>
+    <p class="comment-auth-account">当前账号：${escapeHtml(user.displayName)} · HeoID: ${escapeHtml(user.uid || user.id.slice(0, 5))}</p>
+  `;
+}
+
+function authorizeCommentArea() {
+  if (!state.currentUser || !state.sessionToken) {
+    showToast('请先登录后再授权。', true);
+    return;
+  }
+
+  if (window.parent === window) {
+    showToast('已登录，可回到评论区继续。');
+    return;
+  }
+
+  window.parent.postMessage({
+    type: 'ZEORA_TWIKOO_COMMENT_AUTH',
+    user: state.currentUser,
+    sessionToken: state.sessionToken,
+  }, state.parentOrigin || '*');
+  showToast('已授权评论区。');
 }
 
 async function refreshHealth() {
@@ -199,15 +292,27 @@ async function refreshHealth() {
 
 async function login(credentials, silent = false) {
   const result = await api('login', { method: 'POST', body: credentials });
-  state.currentUser = result.user;
-  state.credentials = credentials;
+  setAuthenticated(result, credentials);
   updateShell();
-  if (!silent) showToast('已进入用户中心。');
+  if (!silent) showToast(state.commentAuth ? '已登录，请确认授权。' : '已进入用户中心。');
+}
+
+function setAuthenticated(result, credentials = null) {
+  state.currentUser = result.user;
+  state.sessionToken = result.sessionToken || state.sessionToken;
+  state.credentials = credentials;
+  if (state.sessionToken) localStorage.setItem(SESSION_TOKEN_KEY, state.sessionToken);
 }
 
 async function refreshCurrentUser() {
-  if (!state.credentials) return;
-  await login(state.credentials, true);
+  if (state.credentials) {
+    await login(state.credentials, true);
+    return;
+  }
+  if (!state.sessionToken) return;
+  const payload = await api('me');
+  state.currentUser = payload.user;
+  updateShell();
 }
 
 function openModal(title, body, options = {}) {
@@ -429,18 +534,49 @@ els.authSwitchBtn.addEventListener('click', () => {
   setAuthMode(els.authSwitchBtn.dataset.authMode);
 });
 
-els.authEmailForm.addEventListener('submit', (event) => {
+els.authEmailForm.addEventListener('submit', async (event) => {
   event.preventDefault();
-  showPasswordStep();
+  try {
+    await showPasswordStep(event.submitter || els.authEmailForm.querySelector('button'));
+  } catch (error) {
+    showToast(error.message, true);
+  }
 });
 
 document.querySelectorAll('[data-back-email]').forEach((button) => {
   button.addEventListener('click', () => {
     els.authEmailForm.classList.remove('hidden');
+    els.authCodeForm.classList.add('hidden');
     els.authPasswordForm.classList.add('hidden');
     els.authRegisterForm.classList.add('hidden');
     els.authEmailInput.focus();
   });
+});
+
+els.authCodeForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const submitter = event.submitter || els.authCodeForm.querySelector('button');
+  submitter.disabled = true;
+  try {
+    const code = formData(els.authCodeForm).code;
+    const displayName = makeUsernameFromEmail(state.authEmail);
+    const result = await api('verifyCode', {
+      method: 'POST',
+      body: {
+        email: state.authEmail,
+        code,
+        username: displayName,
+        displayName,
+      },
+    });
+    setAuthenticated(result);
+    updateShell();
+    showToast('已登录，请确认授权。');
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    submitter.disabled = false;
+  }
 });
 
 els.authPasswordForm.addEventListener('submit', async (event) => {
@@ -480,9 +616,15 @@ els.actionGrid.addEventListener('click', (event) => {
 els.logoutBtn.addEventListener('click', () => {
   state.currentUser = null;
   state.credentials = null;
+  state.sessionToken = '';
   state.users = [];
+  localStorage.removeItem(SESSION_TOKEN_KEY);
   updateShell();
   showToast('已退出登录。');
+});
+
+document.addEventListener('click', (event) => {
+  if (event.target.closest('[data-comment-authorize]')) authorizeCommentArea();
 });
 
 els.modalRoot.addEventListener('click', async (event) => {
@@ -533,10 +675,10 @@ els.modalRoot.addEventListener('submit', async (event) => {
       showToast('资料已更新。');
     }
     if (event.target.id === 'passwordForm') {
-      const body = { email: state.credentials.email, ...formData(event.target) };
+      const body = { email: state.credentials?.email, ...formData(event.target) };
       const payload = await api('changePassword', { method: 'POST', body });
       state.currentUser = payload.user;
-      state.credentials.password = body.newPassword;
+      if (state.credentials) state.credentials.password = body.newPassword;
       updateShell();
       closeModal();
       showToast('密码已更新。');
@@ -569,8 +711,23 @@ document.addEventListener('keydown', (event) => {
 });
 
 (async function boot() {
+  document.body.classList.toggle('is-comment-auth', state.commentAuth);
+  const siteTitle = document.querySelector('#authTitle');
+  if (state.siteName && siteTitle) siteTitle.textContent = state.siteName;
+
   try {
     await refreshHealth();
+    if (state.sessionToken) {
+      try {
+        const payload = await api('me');
+        state.currentUser = payload.user;
+        updateShell();
+        return;
+      } catch (error) {
+        state.sessionToken = '';
+        localStorage.removeItem(SESSION_TOKEN_KEY);
+      }
+    }
     const twikooEmail = detectTwikooEmail();
     els.authEmailInput.value = twikooEmail || 'zeora315@foxmail.com';
     setAuthMode('login');
