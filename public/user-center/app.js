@@ -19,7 +19,8 @@ const state = {
   adminProtected: false,
   adminToken: localStorage.getItem('twikooDemoAdminToken') || '',
   commentAuth: params.get('comment_auth') === '1',
-  parentOrigin: normalizeOrigin(params.get('origin')),
+  parentOrigin: normalizeOrigin(params.get('origin')) || normalizeOrigin(document.referrer),
+  parentAuthorized: false,
   siteName: params.get('site') || '',
   filter: { query: '', role: 'all', status: 'all' },
 };
@@ -277,11 +278,19 @@ function authorizeCommentArea() {
     return;
   }
 
-  window.parent.postMessage({
+  state.parentAuthorized = false;
+  const payload = {
     type: 'ZEORA_TWIKOO_COMMENT_AUTH',
     user: state.currentUser,
     sessionToken: state.sessionToken,
-  }, state.parentOrigin || '*');
+  };
+
+  window.parent.postMessage(payload, state.parentOrigin || '*');
+  if (state.parentOrigin) {
+    setTimeout(() => {
+      if (!state.parentAuthorized) window.parent.postMessage({ ...payload, fallback: true }, '*');
+    }, 450);
+  }
   showToast('已授权评论区。');
 }
 
@@ -708,6 +717,12 @@ els.modalRoot.addEventListener('submit', async (event) => {
 
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') closeModal();
+});
+
+window.addEventListener('message', (event) => {
+  if (event.data?.type === 'ZEORA_TWIKOO_COMMENT_AUTH_ACK') {
+    state.parentAuthorized = true;
+  }
 });
 
 (async function boot() {
