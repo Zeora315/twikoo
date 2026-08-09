@@ -2,6 +2,16 @@ const SESSION_TOKEN_KEY = 'twikooDemoSessionToken';
 const SESSION_USER_KEY = 'twikooDemoSessionUser';
 const params = new URLSearchParams(window.location.search);
 
+function readPublicProfileHandle() {
+  const match = window.location.pathname.match(/^\/user\/([^/]+)\/?$/);
+  if (!match) return '';
+  try {
+    return decodeURIComponent(match[1]).replace(/^@/, '').trim();
+  } catch (error) {
+    return match[1].replace(/^@/, '').trim();
+  }
+}
+
 function normalizeOrigin(value) {
   try {
     return value ? new URL(value).origin : '';
@@ -24,12 +34,14 @@ const state = {
   parentAuthorized: false,
   commentAuthorizePromptShown: false,
   siteName: params.get('site') || '',
+  publicProfileHandle: readPublicProfileHandle(),
   filter: { query: '', role: 'all', status: 'all' },
 };
 
 const els = {
   authView: document.querySelector('#authView'),
   centerView: document.querySelector('#centerView'),
+  publicProfileView: document.querySelector('#publicProfileView'),
   authSwitchText: document.querySelector('#authSwitchText'),
   authSwitchBtn: document.querySelector('#authSwitchBtn'),
   authEmailForm: document.querySelector('#authEmailForm'),
@@ -211,6 +223,9 @@ async function api(action, options = {}) {
   const method = options.method || 'GET';
   const url = new URL('/api/demo', window.location.origin);
   url.searchParams.set('action', action);
+  Object.entries(options.params || {}).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, value);
+  });
   const fetchOptions = { method, headers };
 
   if (state.sessionToken) headers['x-session-token'] = state.sessionToken;
@@ -238,8 +253,64 @@ function formatDate(value) {
   return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
 }
 
+function userMatchesHandle(user, handle) {
+  const value = String(handle || '').replace(/^@/, '').toLowerCase();
+  if (!user || !value) return false;
+  return [user.username, user.uid, user.id]
+    .filter(Boolean)
+    .some((item) => String(item).toLowerCase() === value);
+}
+
+function hideAppViews() {
+  els.authView.classList.add('hidden');
+  els.centerView.classList.add('hidden');
+  els.publicProfileView?.classList.add('hidden');
+  document.querySelector('#commentAuthPanel')?.remove();
+}
+
+function renderPublicProfile(user) {
+  if (!els.publicProfileView) return;
+
+  hideAppViews();
+  els.publicProfileView.classList.remove('hidden');
+  els.publicProfileView.innerHTML = `
+    <a class="public-back" href="/admin" aria-label="返回用户中心">← HeoID</a>
+    <article class="public-profile-card">
+      ${avatarHtml(user, 'public-avatar')}
+      <h1>${escapeHtml(user.displayName || user.username)}</h1>
+      <p class="public-subtitle">${user.role === 'admin' ? '博客管理员' : '评论区用户'}</p>
+      <div class="public-id-row" aria-label="用户身份">
+        <span>UID ${escapeHtml(user.uid || user.id.slice(0, 5))}</span>
+        <span>@${escapeHtml(user.username)}</span>
+      </div>
+      ${state.currentUser && userMatchesHandle(state.currentUser, user.username)
+        ? '<a class="public-primary" href="/admin">进入后台</a>'
+        : ''}
+    </article>
+  `;
+}
+
+async function loadPublicProfile() {
+  hideAppViews();
+  try {
+    const payload = await api('profile', { params: { handle: state.publicProfileHandle } });
+    renderPublicProfile(payload.user);
+  } catch (error) {
+    els.publicProfileView.classList.remove('hidden');
+    els.publicProfileView.innerHTML = `
+      <a class="public-back" href="/admin" aria-label="返回用户中心">← HeoID</a>
+      <article class="public-profile-card">
+        <div class="public-avatar" aria-hidden="true">?</div>
+        <h1>用户不存在</h1>
+        <p class="public-subtitle">${escapeHtml(error.message)}</p>
+      </article>
+    `;
+  }
+}
+
 function updateShell() {
   const user = state.currentUser;
+  els.publicProfileView?.classList.add('hidden');
   if (!user) {
     els.authView.classList.remove('hidden');
     els.centerView.classList.add('hidden');
@@ -813,11 +884,34 @@ window.addEventListener('message', (event) => {
 
 (async function boot() {
   document.body.classList.toggle('is-comment-auth', state.commentAuth);
+  document.body.classList.toggle('is-public-profile', Boolean(state.publicProfileHandle));
   const siteTitle = document.querySelector('#authTitle');
   if (state.siteName && siteTitle) siteTitle.textContent = state.siteName;
 
   try {
     await refreshHealth();
+    if (state.publicProfileHandle) {
+      if (state.sessionToken) {
+        const storedUser = readStoredUser();
+        if (storedUser) state.currentUser = storedUser;
+        try {
+          const payload = await api('me');
+          state.currentUser = payload.user;
+          persistSession(state.currentUser, state.sessionToken);
+          if (userMatchesHandle(state.currentUser, state.publicProfileHandle)) {
+            window.location.replace('/admin');
+            return;
+          }
+        } catch (error) {
+          state.currentUser = null;
+          state.sessionToken = '';
+          clearStoredSession();
+        }
+      }
+      await loadPublicProfile();
+      return;
+    }
+
     if (state.sessionToken) {
       const storedUser = readStoredUser();
       if (storedUser) {
@@ -840,6 +934,10 @@ window.addEventListener('message', (event) => {
     setAuthMode('login');
     updateShell();
   } catch (error) {
+    if (state.publicProfileHandle) {
+      await loadPublicProfile();
+      return;
+    }
     els.authEmailInput.value = 'zeora315@foxmail.com';
     setAuthMode('login');
     updateShell();

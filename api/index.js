@@ -16,7 +16,15 @@ function getRequestPath(req) {
 }
 
 function serveUserCenterFile(req, res, pathname) {
-  const requestedFile = pathname === '/user-center' || pathname === '/user-center/' || pathname === '/admin' || pathname === '/admin/'
+  const isEntry =
+    pathname === '/user-center' ||
+    pathname === '/user-center/' ||
+    pathname === '/admin' ||
+    pathname === '/admin/' ||
+    pathname === '/user' ||
+    pathname === '/user/' ||
+    /^\/user\/[^/]+\/?$/.test(pathname);
+  const requestedFile = isEntry
     ? 'index.html'
     : pathname.replace(/^\/(user-center|admin)\/?/, '');
 
@@ -42,7 +50,14 @@ module.exports = async function twikooWithDemo(req, res) {
     return demoUsersApi(req, res);
   }
 
-  if (pathname === '/user-center' || pathname.startsWith('/user-center/') || pathname === '/admin' || pathname.startsWith('/admin/')) {
+  if (
+    pathname === '/user-center' ||
+    pathname.startsWith('/user-center/') ||
+    pathname === '/admin' ||
+    pathname.startsWith('/admin/') ||
+    pathname === '/user' ||
+    pathname.startsWith('/user/')
+  ) {
     return serveUserCenterFile(req, res, pathname);
   }
 

@@ -223,6 +223,19 @@ function toPublicUser(user) {
   };
 }
 
+function toProfileUser(user) {
+  return {
+    id: user.id,
+    uid: makeUid(user),
+    username: user.username,
+    displayName: user.displayName,
+    avatarUrl: user.avatarUrl || '',
+    role: user.role || 'user',
+    status: user.status || 'active',
+    createdAt: user.createdAt,
+  };
+}
+
 function seedMemoryStore() {
   memoryStore.seeded = true;
 }
@@ -318,6 +331,26 @@ async function findUserByUsername(collection, usernameLower) {
   if (collection) return collection.findOne({ usernameLower });
   seedMemoryStore();
   return memoryStore.users.find((user) => user.usernameLower === usernameLower);
+}
+
+async function findUserByUid(collection, uid) {
+  if (!uid) return null;
+  if (collection) return collection.findOne({ uid });
+  seedMemoryStore();
+  return memoryStore.users.find((user) => user.uid === uid);
+}
+
+async function findUserByPublicHandle(collection, handle) {
+  const value = cleanString(handle).replace(/^@/, '');
+  if (!value) throw new HttpError(400, '缺少用户 ID。');
+
+  const byUsername = await findUserByUsername(collection, value.toLowerCase());
+  if (byUsername) return byUsername;
+
+  const byUid = await findUserByUid(collection, value);
+  if (byUid) return byUid;
+
+  return findUserById(collection, value);
 }
 
 async function createUniqueUsername(collection, email) {
@@ -814,6 +847,13 @@ async function handle(req, res) {
   if (action === 'me' && req.method === 'GET') {
     const user = await requireSessionUser(collection, req, body);
     send(res, 200, { ok: true, user: toPublicUser(user) });
+    return;
+  }
+
+  if (action === 'profile' && req.method === 'GET') {
+    const user = await findUserByPublicHandle(collection, url.searchParams.get('handle'));
+    if (!user || user.status === 'blocked') throw new HttpError(404, '用户不存在。');
+    send(res, 200, { ok: true, user: toProfileUser(user) });
     return;
   }
 
