@@ -208,16 +208,23 @@ async function showPasswordStep(submitter) {
 
 async function api(action, options = {}) {
   const headers = {};
-  const fetchOptions = { method: options.method || 'GET', headers };
+  const method = options.method || 'GET';
+  const url = new URL('/api/demo', window.location.origin);
+  url.searchParams.set('action', action);
+  const fetchOptions = { method, headers };
 
   if (state.sessionToken) headers['x-session-token'] = state.sessionToken;
   if (state.adminToken) headers['x-admin-token'] = state.adminToken;
+  if (state.sessionToken && method === 'GET') url.searchParams.set('sessionToken', state.sessionToken);
   if (options.body) {
     headers['content-type'] = 'application/json';
-    fetchOptions.body = JSON.stringify(options.body);
+    fetchOptions.body = JSON.stringify({
+      ...options.body,
+      ...(state.sessionToken ? { sessionToken: state.sessionToken } : {}),
+    });
   }
 
-  const response = await fetch(`/api/demo?action=${encodeURIComponent(action)}`, fetchOptions);
+  const response = await fetch(url.toString(), fetchOptions);
   const payload = await response.json();
   if (!response.ok || !payload.ok) {
     throw new Error(payload.message || '请求失败。');
@@ -510,7 +517,7 @@ async function renderAdminModal() {
 
 async function loadAdminUsers() {
   try {
-    const payload = await api('listUsers');
+    const payload = await api('listUsers', { method: 'POST', body: {} });
     state.users = payload.users;
     renderAdminTable();
   } catch (error) {

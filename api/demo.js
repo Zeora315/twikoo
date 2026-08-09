@@ -409,7 +409,8 @@ function signSession(user) {
 function readSessionToken(req, body = {}) {
   const auth = req.headers.authorization || '';
   if (/^bearer\s+/i.test(auth)) return auth.replace(/^bearer\s+/i, '').trim();
-  return cleanString(req.headers['x-session-token'] || body.sessionToken);
+  const urlToken = getRequestUrl(req).searchParams.get('sessionToken');
+  return cleanString(req.headers['x-session-token'] || body.sessionToken || urlToken);
 }
 
 function verifySessionToken(req, body = {}) {
@@ -826,7 +827,7 @@ async function handle(req, res) {
     return;
   }
 
-  if (action === 'listUsers' && req.method === 'GET') {
+  if (action === 'listUsers' && (req.method === 'GET' || req.method === 'POST')) {
     await authorizeAdmin(collection, req, body, url);
     send(res, 200, { ok: true, users: await listUsers(collection), storageMode });
     return;
