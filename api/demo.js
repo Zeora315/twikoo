@@ -5,6 +5,7 @@ const CODE_COLLECTION_NAME = process.env.DEMO_CODES_COLLECTION || `${COLLECTION_
 const DB_NAME = process.env.DEMO_MONGODB_DB || undefined;
 const PASSWORD_ITERATIONS = 120000;
 const MAX_AVATAR_LENGTH = 240000;
+const MAX_BIO_LENGTH = 120;
 const CODE_TTL_MS = 10 * 60 * 1000;
 const CODE_RESEND_MS = 60 * 1000;
 const CODE_MAX_ATTEMPTS = 5;
@@ -117,6 +118,35 @@ function validateAvatarUrl(avatarUrl) {
   throw new HttpError(400, '头像只能填写 http(s) 图片外链。');
 }
 
+function validateWebsiteUrl(websiteUrl) {
+  const raw = cleanString(websiteUrl);
+  if (!raw) return '';
+  const value = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  if (value.length > 220) throw new HttpError(400, '个人网站链接不能超过 220 个字符。');
+  try {
+    const url = new URL(value);
+    if (!['http:', 'https:'].includes(url.protocol)) throw new Error('invalid protocol');
+    return url.toString().replace(/\/$/, '');
+  } catch (error) {
+    throw new HttpError(400, '个人网站链接格式不正确。');
+  }
+}
+
+function validateOptionalEmail(email, label = '联系邮箱') {
+  const value = cleanString(email).toLowerCase();
+  if (!value) return '';
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value)) {
+    throw new HttpError(400, `${label}格式不正确。`);
+  }
+  return value;
+}
+
+function validateBio(bio) {
+  const value = cleanString(bio);
+  if (value.length > MAX_BIO_LENGTH) throw new HttpError(400, `个人简介不能超过 ${MAX_BIO_LENGTH} 个字符。`);
+  return value;
+}
+
 function makeUsernameFromEmail(email) {
   const localPart = normalizeEmail(email).split('@')[0] || 'user';
   const cleaned = localPart.replace(/[^a-zA-Z0-9_.-]/g, '_').replace(/^[-_.]+|[-_.]+$/g, '');
@@ -129,6 +159,9 @@ function validateRegistration(body) {
   const email = validateEmail(body.email);
   const password = String(body.password || '');
   const avatarUrl = validateAvatarUrl(body.avatarUrl);
+  const bio = validateBio(body.bio);
+  const websiteUrl = validateWebsiteUrl(body.websiteUrl);
+  const contactEmail = validateOptionalEmail(body.contactEmail, '公开联系邮箱');
 
   if (!/^[a-zA-Z0-9_.-]{3,32}$/.test(username)) {
     throw new HttpError(400, '用户名需要 3-32 位，只能包含字母、数字、下划线、点或短横线。');
@@ -140,7 +173,7 @@ function validateRegistration(body) {
     throw new HttpError(400, '密码至少需要 8 位。');
   }
 
-  return { username, usernameLower: username.toLowerCase(), displayName, email, emailLower: email, password, avatarUrl };
+  return { username, usernameLower: username.toLowerCase(), displayName, email, emailLower: email, password, avatarUrl, bio, websiteUrl, contactEmail };
 }
 
 function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
@@ -214,6 +247,9 @@ function toPublicUser(user) {
     displayName: user.displayName,
     email: user.email,
     avatarUrl: user.avatarUrl || '',
+    bio: user.bio || '',
+    websiteUrl: user.websiteUrl || '',
+    contactEmail: user.contactEmail || '',
     role: user.role || 'user',
     status: user.status || 'active',
     notifications: user.notifications || defaultNotifications(),
@@ -230,6 +266,9 @@ function toProfileUser(user) {
     username: user.username,
     displayName: user.displayName,
     avatarUrl: user.avatarUrl || '',
+    bio: user.bio || '',
+    websiteUrl: user.websiteUrl || '',
+    contactEmail: user.contactEmail || '',
     role: user.role || 'user',
     status: user.status || 'active',
     createdAt: user.createdAt,
@@ -401,6 +440,9 @@ async function registerUser(collection, body) {
     email: input.email,
     emailLower: input.emailLower,
     avatarUrl: input.avatarUrl,
+    bio: input.bio,
+    websiteUrl: input.websiteUrl,
+    contactEmail: input.contactEmail,
     role,
     status: 'active',
     notifications: defaultNotifications(),
@@ -673,6 +715,9 @@ async function verifyLoginCode(userCollection, codeCollection, body) {
       email: emailLower,
       emailLower,
       avatarUrl: validateAvatarUrl(body.avatarUrl),
+      bio: validateBio(body.bio),
+      websiteUrl: validateWebsiteUrl(body.websiteUrl),
+      contactEmail: validateOptionalEmail(body.contactEmail, '公开联系邮箱'),
       role: await roleForNewUser(userCollection),
       status: 'active',
       notifications: defaultNotifications(),
@@ -703,6 +748,9 @@ function pickUserUpdates(body, allowRoleStatus) {
     updates.displayName = displayName;
   }
   if (body.avatarUrl !== undefined) updates.avatarUrl = validateAvatarUrl(body.avatarUrl);
+  if (body.bio !== undefined) updates.bio = validateBio(body.bio);
+  if (body.websiteUrl !== undefined) updates.websiteUrl = validateWebsiteUrl(body.websiteUrl);
+  if (body.contactEmail !== undefined) updates.contactEmail = validateOptionalEmail(body.contactEmail, '公开联系邮箱');
   if (!allowRoleStatus && body.notifications !== undefined) {
     const current = typeof body.notifications === 'object' && body.notifications ? body.notifications : {};
     updates.notifications = {

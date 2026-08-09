@@ -43,7 +43,15 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  if (url.pathname === '/user-center' || url.pathname === '/user-center/' || url.pathname === '/admin' || url.pathname === '/admin/') {
+  if (
+    url.pathname === '/user-center' ||
+    url.pathname === '/user-center/' ||
+    url.pathname === '/admin' ||
+    url.pathname === '/admin/' ||
+    url.pathname === '/user' ||
+    url.pathname === '/user/' ||
+    /^\/user\/[^/]+\/?$/.test(url.pathname)
+  ) {
     sendFile(res, 'index.html');
     return;
   }

@@ -28,7 +28,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -116,7 +117,8 @@ p {
 }
 
 .field input,
-.field select {
+.field select,
+.field textarea {
   width: 100%;
   min-height: 44px;
   border: 1px solid #ccd6e8;
@@ -124,6 +126,12 @@ p {
   background: #fff;
   color: var(--text);
   padding: 10px 12px;
+}
+
+.field textarea {
+  min-height: 86px;
+  resize: vertical;
+  line-height: 1.55;
 }
 
 .field input:disabled {
@@ -241,10 +249,17 @@ p {
   font-weight: 700;
 }
 
+.bio-line,
 .mail-line {
   margin-bottom: 0;
   color: #777d89;
   font-size: 19px;
+}
+
+.bio-line {
+  margin: 0 0 8px;
+  color: #515865;
+  overflow-wrap: anywhere;
 }
 
 .role-badge {
@@ -522,6 +537,8 @@ body.is-public-profile .page-shell {
   margin: 0;
   color: #737b89;
   font-size: 14px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
 }
 
 .public-id-row {
@@ -538,22 +555,47 @@ body.is-public-profile .page-shell {
   align-items: center;
   min-height: 26px;
   border-radius: 999px;
-  background: #f2f5fa;
   padding: 0 10px;
 }
 
-.public-primary {
+.public-actions {
+  display: grid;
+  gap: 14px;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.public-primary,
+.public-secondary {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 100%;
   min-height: 46px;
-  margin-top: 10px;
   border-radius: 999px;
-  background: #1f2024;
-  color: #fff;
   text-decoration: none;
   font-weight: 900;
+}
+
+.public-primary {
+  background: #1f2024;
+  color: #fff;
+}
+
+.public-secondary {
+  border: 1px solid #dfe4ee;
+  background: #fff;
+  color: #4d5663;
+}
+
+.public-report {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  color: #a0a6b2;
+  font-size: 12px;
+  text-decoration: none;
 }
 
 .modal-root {

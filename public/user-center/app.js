@@ -32,7 +32,7 @@ const state = {
   commentAuth: params.get('comment_auth') === '1',
   parentOrigin: normalizeOrigin(params.get('origin')) || normalizeOrigin(document.referrer),
   parentAuthorized: false,
-  commentAuthorizePromptShown: false,
+  commentAuthCompleted: false,
   siteName: params.get('site') || '',
   publicProfileHandle: readPublicProfileHandle(),
   filter: { query: '', role: 'all', status: 'all' },
@@ -273,20 +273,26 @@ function renderPublicProfile(user) {
 
   hideAppViews();
   els.publicProfileView.classList.remove('hidden');
+  const websiteUrl = user.websiteUrl || '';
+  const contactEmail = user.contactEmail || '';
   els.publicProfileView.innerHTML = `
     <a class="public-back" href="/admin" aria-label="返回用户中心">← HeoID</a>
     <article class="public-profile-card">
       ${avatarHtml(user, 'public-avatar')}
       <h1>${escapeHtml(user.displayName || user.username)}</h1>
-      <p class="public-subtitle">${user.role === 'admin' ? '博客管理员' : '评论区用户'}</p>
+      <p class="public-subtitle">${escapeHtml(user.bio || '这个人还没有填写个人简介')}</p>
       <div class="public-id-row" aria-label="用户身份">
-        <span>UID ${escapeHtml(user.uid || user.id.slice(0, 5))}</span>
         <span>@${escapeHtml(user.username)}</span>
+      </div>
+      <div class="public-actions">
+        ${websiteUrl ? `<a class="public-primary" href="${escapeHtml(websiteUrl)}" target="_blank" rel="noopener">立即访问个人网站</a>` : ''}
+        ${contactEmail ? `<a class="public-secondary" href="mailto:${escapeHtml(contactEmail)}">联系我</a>` : ''}
       </div>
       ${state.currentUser && userMatchesHandle(state.currentUser, user.username)
         ? '<a class="public-primary" href="/admin">进入后台</a>'
         : ''}
     </article>
+    <a class="public-report" href="/me?view=report-create">违法信息举报</a>
   `;
 }
 
@@ -326,62 +332,17 @@ function updateShell() {
   els.profileUid.textContent = `UID: ${user.uid || user.id.slice(0, 5)}`;
   els.profileJoined.textContent = `加入于 ${formatDate(user.createdAt)}`;
   els.profileEmail.textContent = user.email;
+  const existingBio = document.querySelector('#profileBio');
+  if (existingBio) existingBio.textContent = user.bio || '还没有填写个人简介';
   els.roleBadge.classList.toggle('hidden', user.role !== 'admin');
   els.adminCard.classList.toggle('hidden', user.role !== 'admin');
   els.actionGrid.classList.toggle('hidden', state.commentAuth);
   if (state.commentAuth) {
-    renderCommentAuthorization();
-    requestAnimationFrame(openCommentAuthorizeDialog);
+    document.querySelector('#commentAuthPanel')?.remove();
+    authorizeCommentArea();
   } else {
     document.querySelector('#commentAuthPanel')?.remove();
   }
-}
-
-function renderCommentAuthorization() {
-  let panel = document.querySelector('#commentAuthPanel');
-  if (!panel) {
-    panel = document.createElement('section');
-    panel.id = 'commentAuthPanel';
-    panel.className = 'comment-auth-panel';
-    document.querySelector('.profile-hero')?.after(panel);
-  }
-
-  const user = state.currentUser;
-  panel.innerHTML = `
-    <div class="comment-auth-copy">
-      <h2>授权评论区</h2>
-      <p>${escapeHtml(state.siteName || '当前站点')} 将使用你的公开资料完成评论。</p>
-    </div>
-    <ul class="permission-list" aria-label="授权权限">
-      <li>获取用户基本信息</li>
-      <li>发送通知</li>
-      <li>获取邮箱地址</li>
-    </ul>
-    <button class="primary-btn authorize-login-btn" type="button" data-comment-authorize>确认登录</button>
-    <p class="comment-auth-account">当前账号：${escapeHtml(user.displayName)} · HeoID: ${escapeHtml(user.uid || user.id.slice(0, 5))}</p>
-  `;
-}
-
-function openCommentAuthorizeDialog() {
-  if (!state.commentAuth || !state.currentUser || state.commentAuthorizePromptShown) return;
-  state.commentAuthorizePromptShown = true;
-  const user = state.currentUser;
-  openModal('是否授权博客评论？', `
-    <div class="comment-consent">
-      <div class="consent-user">
-        ${avatarHtml(user, 'consent-avatar')}
-        <span>
-          <strong>${escapeHtml(user.displayName || user.username)}</strong>
-          <small>HeoID: ${escapeHtml(user.uid || user.id.slice(0, 5))}</small>
-        </span>
-      </div>
-      <p>${escapeHtml(state.siteName || '当前博客')} 将使用你的昵称、头像和邮箱发表评论。</p>
-      <div class="form-actions consent-actions">
-        <button class="primary-btn authorize-login-btn" type="button" data-comment-authorize>允许</button>
-        <button class="ghost-btn" type="button" data-close-modal>暂不</button>
-      </div>
-    </div>
-  `);
 }
 
 function authorizeCommentArea() {
@@ -389,6 +350,8 @@ function authorizeCommentArea() {
     showToast('请先登录后再授权。', true);
     return;
   }
+  if (state.commentAuthCompleted) return;
+  state.commentAuthCompleted = true;
 
   if (window.parent === window) {
     showToast('已登录，可回到评论区继续。');
@@ -409,7 +372,7 @@ function authorizeCommentArea() {
     }, 450);
   }
   closeModal();
-  showToast('已授权评论区。');
+  showToast('已登录，正在返回评论区。');
 }
 
 async function refreshHealth() {
@@ -421,7 +384,7 @@ async function login(credentials, silent = false) {
   const result = await api('login', { method: 'POST', body: credentials });
   setAuthenticated(result, credentials);
   updateShell();
-  if (!silent) showToast(state.commentAuth ? '已登录，请确认授权。' : '已进入用户中心。');
+  if (!silent && !state.commentAuth) showToast('已进入用户中心。');
 }
 
 function setAuthenticated(result, credentials = null) {
@@ -486,7 +449,19 @@ function renderEditModal() {
           <input id="avatarUrlInput" name="avatarUrl" value="${escapeHtml(user.avatarUrl || '')}" placeholder="https://example.com/avatar.png" />
         </label>
         <label class="field">
-          <span>邮箱</span>
+          <span>个人简介</span>
+          <textarea name="bio" maxlength="120" rows="3" placeholder="介绍一下你自己">${escapeHtml(user.bio || '')}</textarea>
+        </label>
+        <label class="field">
+          <span>个人网站</span>
+          <input name="websiteUrl" value="${escapeHtml(user.websiteUrl || '')}" placeholder="https://example.com" />
+        </label>
+        <label class="field">
+          <span>公开联系邮箱</span>
+          <input name="contactEmail" type="email" value="${escapeHtml(user.contactEmail || '')}" placeholder="name@example.com" />
+        </label>
+        <label class="field">
+          <span>登录邮箱</span>
           <input value="${escapeHtml(user.email)}" disabled />
         </label>
         <div class="form-actions">
@@ -600,7 +575,7 @@ async function loadAdminUsers() {
 
 function filteredUsers() {
   return state.users.filter((user) => {
-    const queryTarget = `${user.displayName} ${user.username} ${user.email} ${user.uid}`.toLowerCase();
+    const queryTarget = `${user.displayName} ${user.username} ${user.email} ${user.uid} ${user.bio || ''} ${user.websiteUrl || ''} ${user.contactEmail || ''}`.toLowerCase();
     const matchesQuery = !state.filter.query || queryTarget.includes(state.filter.query);
     const matchesRole = state.filter.role === 'all' || user.role === state.filter.role;
     const matchesStatus = state.filter.status === 'all' || user.status === state.filter.status;
@@ -676,6 +651,9 @@ function renderUserDetailModal(user) {
       <p><b>用户名</b><span>@${escapeHtml(user.username)}</span></p>
       <p><b>邮箱</b><span>${escapeHtml(user.email)}</span></p>
       <p><b>头像外链</b><span>${escapeHtml(user.avatarUrl || '未设置')}</span></p>
+      <p><b>个人简介</b><span>${escapeHtml(user.bio || '未设置')}</span></p>
+      <p><b>个人网站</b><span>${escapeHtml(user.websiteUrl || '未设置')}</span></p>
+      <p><b>联系邮箱</b><span>${escapeHtml(user.contactEmail || '未设置')}</span></p>
       <p><b>身份</b><span>${user.role === 'admin' ? '管理员' : '无标签用户'}</span></p>
       <p><b>状态</b><span>${user.status === 'blocked' ? '停用' : '可用'}</span></p>
       <p><b>注册时间</b><span>${escapeHtml(formatDate(user.createdAt))}</span></p>
@@ -732,7 +710,7 @@ els.authCodeForm.addEventListener('submit', async (event) => {
     });
     setAuthenticated(result);
     updateShell();
-    showToast('已登录，请确认授权。');
+    if (!state.commentAuth) showToast('已登录。');
   } catch (error) {
     showToast(error.message, true);
   } finally {
@@ -782,10 +760,6 @@ els.logoutBtn.addEventListener('click', () => {
   clearStoredSession();
   updateShell();
   showToast('已退出登录。');
-});
-
-document.addEventListener('click', (event) => {
-  if (event.target.closest('[data-comment-authorize]')) authorizeCommentArea();
 });
 
 els.modalRoot.addEventListener('click', async (event) => {
