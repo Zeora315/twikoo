@@ -516,6 +516,71 @@ body.is-comment-auth .mail-line {
   margin-top: 4px;
 }
 
+.comment-consent {
+  display: grid;
+  gap: 18px;
+}
+
+.comment-consent p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.consent-user {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #f8faff;
+  padding: 12px;
+}
+
+.consent-user span {
+  display: grid;
+  gap: 2px;
+}
+
+.consent-user strong {
+  color: var(--ink);
+}
+
+.consent-user small {
+  color: var(--muted);
+}
+
+.consent-avatar,
+.detail-avatar {
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #e8ecf5;
+  font-weight: 900;
+  overflow: hidden;
+}
+
+.consent-avatar {
+  width: 48px;
+  height: 48px;
+}
+
+.detail-avatar {
+  width: 52px;
+  height: 52px;
+}
+
+.consent-avatar img,
+.detail-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.consent-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
 .switch-list {
   display: grid;
   gap: 14px;
@@ -566,6 +631,42 @@ body.is-comment-auth .mail-line {
 .admin-toolbar input {
   flex: 1;
   min-width: 220px;
+}
+
+.admin-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.admin-summary span {
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #f8faff;
+  padding: 12px;
+}
+
+.admin-summary strong {
+  color: var(--ink);
+  font-size: 22px;
+  line-height: 1;
+}
+
+.admin-summary small,
+.muted-line {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.admin-error {
+  border: 1px solid #ffd3dc;
+  border-radius: 14px;
+  background: #fff4f6;
+  color: var(--bad);
+  padding: 14px;
 }
 
 .user-table {
@@ -661,6 +762,36 @@ body.is-comment-auth .mail-line {
 .row-actions .delete-user {
   background: #ffe6eb;
   color: var(--bad);
+}
+
+.detail-list {
+  display: grid;
+  gap: 10px;
+}
+
+.detail-list > div {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.detail-list p {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 10px;
+  margin: 0;
+  border-bottom: 1px solid var(--line);
+  padding: 10px 0;
+}
+
+.detail-list b {
+  color: #4c535f;
+}
+
+.detail-list span {
+  color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
 .toast {

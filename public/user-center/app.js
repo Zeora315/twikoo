@@ -1,4 +1,5 @@
 const SESSION_TOKEN_KEY = 'twikooDemoSessionToken';
+const SESSION_USER_KEY = 'twikooDemoSessionUser';
 const params = new URLSearchParams(window.location.search);
 
 function normalizeOrigin(value) {
@@ -21,6 +22,7 @@ const state = {
   commentAuth: params.get('comment_auth') === '1',
   parentOrigin: normalizeOrigin(params.get('origin')) || normalizeOrigin(document.referrer),
   parentAuthorized: false,
+  commentAuthorizePromptShown: false,
   siteName: params.get('site') || '',
   filter: { query: '', role: 'all', status: 'all' },
 };
@@ -87,6 +89,24 @@ function showToast(message, isError = false) {
 
 function formData(form) {
   return Object.fromEntries(new FormData(form).entries());
+}
+
+function readStoredUser() {
+  try {
+    return JSON.parse(localStorage.getItem(SESSION_USER_KEY) || 'null');
+  } catch (error) {
+    return null;
+  }
+}
+
+function persistSession(user, token) {
+  if (token) localStorage.setItem(SESSION_TOKEN_KEY, token);
+  if (user) localStorage.setItem(SESSION_USER_KEY, JSON.stringify(user));
+}
+
+function clearStoredSession() {
+  localStorage.removeItem(SESSION_TOKEN_KEY);
+  localStorage.removeItem(SESSION_USER_KEY);
 }
 
 function findEmailInValue(value) {
@@ -170,10 +190,6 @@ async function requestCodeStep(submitter) {
 
 async function showPasswordStep(submitter) {
   state.authEmail = els.authEmailInput.value.trim().toLowerCase();
-  if (state.commentAuth) {
-    await requestCodeStep(submitter);
-    return;
-  }
 
   els.authEmailForm.classList.add('hidden');
   els.authCodeForm.classList.add('hidden');
@@ -237,6 +253,7 @@ function updateShell() {
   els.actionGrid.classList.toggle('hidden', state.commentAuth);
   if (state.commentAuth) {
     renderCommentAuthorization();
+    requestAnimationFrame(openCommentAuthorizeDialog);
   } else {
     document.querySelector('#commentAuthPanel')?.remove();
   }
@@ -267,6 +284,28 @@ function renderCommentAuthorization() {
   `;
 }
 
+function openCommentAuthorizeDialog() {
+  if (!state.commentAuth || !state.currentUser || state.commentAuthorizePromptShown) return;
+  state.commentAuthorizePromptShown = true;
+  const user = state.currentUser;
+  openModal('是否授权博客评论？', `
+    <div class="comment-consent">
+      <div class="consent-user">
+        ${avatarHtml(user, 'consent-avatar')}
+        <span>
+          <strong>${escapeHtml(user.displayName || user.username)}</strong>
+          <small>HeoID: ${escapeHtml(user.uid || user.id.slice(0, 5))}</small>
+        </span>
+      </div>
+      <p>${escapeHtml(state.siteName || '当前博客')} 将使用你的昵称、头像和邮箱发表评论。</p>
+      <div class="form-actions consent-actions">
+        <button class="primary-btn authorize-login-btn" type="button" data-comment-authorize>允许</button>
+        <button class="ghost-btn" type="button" data-close-modal>暂不</button>
+      </div>
+    </div>
+  `);
+}
+
 function authorizeCommentArea() {
   if (!state.currentUser || !state.sessionToken) {
     showToast('请先登录后再授权。', true);
@@ -291,6 +330,7 @@ function authorizeCommentArea() {
       if (!state.parentAuthorized) window.parent.postMessage({ ...payload, fallback: true }, '*');
     }, 450);
   }
+  closeModal();
   showToast('已授权评论区。');
 }
 
@@ -310,7 +350,7 @@ function setAuthenticated(result, credentials = null) {
   state.currentUser = result.user;
   state.sessionToken = result.sessionToken || state.sessionToken;
   state.credentials = credentials;
-  if (state.sessionToken) localStorage.setItem(SESSION_TOKEN_KEY, state.sessionToken);
+  persistSession(state.currentUser, state.sessionToken);
 }
 
 async function refreshCurrentUser() {
@@ -448,6 +488,7 @@ async function renderAdminModal() {
       </select>
       <button id="adminRefresh" class="ghost-btn" type="button">刷新列表</button>
     </div>
+    <div id="adminSummary" class="admin-summary" aria-label="用户概览"></div>
     <div id="adminTableWrap">正在加载用户...</div>
   `, { wide: true });
 
@@ -473,6 +514,8 @@ async function loadAdminUsers() {
     state.users = payload.users;
     renderAdminTable();
   } catch (error) {
+    const wrap = document.querySelector('#adminTableWrap');
+    if (wrap) wrap.innerHTML = `<p class="admin-error">${escapeHtml(error.message)}</p>`;
     showToast(error.message, true);
   }
 }
@@ -491,6 +534,7 @@ function renderAdminTable() {
   const wrap = document.querySelector('#adminTableWrap');
   if (!wrap) return;
   const users = filteredUsers();
+  renderAdminSummary(users);
   if (!users.length) {
     wrap.innerHTML = '<p>没有符合条件的用户。</p>';
     return;
@@ -501,8 +545,8 @@ function renderAdminTable() {
         <tr>
           <th>用户</th>
           <th>UID / 邮箱</th>
-          <th>身份</th>
-          <th>状态</th>
+          <th>注册 / 登录</th>
+          <th>身份 / 状态</th>
           <th>操作</th>
         </tr>
       </thead>
@@ -515,11 +559,12 @@ function renderAdminTable() {
                 <span><strong>${escapeHtml(user.displayName)}</strong><br />@${escapeHtml(user.username)}</span>
               </div>
             </td>
-            <td>UID: ${escapeHtml(user.uid)}<br />${escapeHtml(user.email)}</td>
-            <td><span class="status-pill ${user.role === 'admin' ? 'is-admin' : 'is-user'}">${user.role === 'admin' ? '管理员' : '无标签'}</span></td>
-            <td><span class="status-pill ${user.status === 'blocked' ? 'is-blocked' : 'is-active'}">${user.status === 'blocked' ? '停用' : '可用'}</span></td>
+            <td>UID: ${escapeHtml(user.uid)}<br /><span class="muted-line">${escapeHtml(user.email)}</span><br /><span class="muted-line">ID: ${escapeHtml(user.id)}</span></td>
+            <td>${escapeHtml(formatDate(user.createdAt))}<br /><span class="muted-line">最后登录：${escapeHtml(formatDate(user.lastLoginAt))}</span></td>
+            <td><span class="status-pill ${user.role === 'admin' ? 'is-admin' : 'is-user'}">${user.role === 'admin' ? '管理员' : '无标签'}</span><br /><span class="status-pill ${user.status === 'blocked' ? 'is-blocked' : 'is-active'}">${user.status === 'blocked' ? '停用' : '可用'}</span></td>
             <td>
               <div class="row-actions">
+                <button type="button" data-user-detail="${escapeHtml(user.id)}">详情</button>
                 <button type="button" data-toggle-role="${escapeHtml(user.id)}">${user.role === 'admin' ? '移除管理员' : '设为管理员'}</button>
                 <button type="button" data-toggle-status="${escapeHtml(user.id)}">${user.status === 'blocked' ? '启用' : '停用'}</button>
                 <button class="delete-user" type="button" data-delete="${escapeHtml(user.id)}">删除</button>
@@ -530,6 +575,35 @@ function renderAdminTable() {
       </tbody>
     </table>
   `;
+}
+
+function renderAdminSummary(users = state.users) {
+  const target = document.querySelector('#adminSummary');
+  if (!target) return;
+  const admins = users.filter((user) => user.role === 'admin').length;
+  const blocked = users.filter((user) => user.status === 'blocked').length;
+  target.innerHTML = `
+    <span><strong>${users.length}</strong><small>当前列表</small></span>
+    <span><strong>${admins}</strong><small>管理员</small></span>
+    <span><strong>${blocked}</strong><small>停用</small></span>
+  `;
+}
+
+function renderUserDetailModal(user) {
+  openModal('用户详情', `
+    <div class="detail-list">
+      <div>${avatarHtml(user, 'detail-avatar')}<strong>${escapeHtml(user.displayName)}</strong></div>
+      <p><b>UID</b><span>${escapeHtml(user.uid)}</span></p>
+      <p><b>ID</b><span>${escapeHtml(user.id)}</span></p>
+      <p><b>用户名</b><span>@${escapeHtml(user.username)}</span></p>
+      <p><b>邮箱</b><span>${escapeHtml(user.email)}</span></p>
+      <p><b>头像外链</b><span>${escapeHtml(user.avatarUrl || '未设置')}</span></p>
+      <p><b>身份</b><span>${user.role === 'admin' ? '管理员' : '无标签用户'}</span></p>
+      <p><b>状态</b><span>${user.status === 'blocked' ? '停用' : '可用'}</span></p>
+      <p><b>注册时间</b><span>${escapeHtml(formatDate(user.createdAt))}</span></p>
+      <p><b>最后登录</b><span>${escapeHtml(formatDate(user.lastLoginAt))}</span></p>
+    </div>
+  `);
 }
 
 async function updateAdminUser(user, updates) {
@@ -627,7 +701,7 @@ els.logoutBtn.addEventListener('click', () => {
   state.credentials = null;
   state.sessionToken = '';
   state.users = [];
-  localStorage.removeItem(SESSION_TOKEN_KEY);
+  clearStoredSession();
   updateShell();
   showToast('已退出登录。');
 });
@@ -645,13 +719,18 @@ els.modalRoot.addEventListener('click', async (event) => {
   const roleButton = event.target.closest('[data-toggle-role]');
   const statusButton = event.target.closest('[data-toggle-status]');
   const deleteButton = event.target.closest('[data-delete]');
-  const userId = roleButton?.dataset.toggleRole || statusButton?.dataset.toggleStatus || deleteButton?.dataset.delete;
+  const detailButton = event.target.closest('[data-user-detail]');
+  const userId = roleButton?.dataset.toggleRole || statusButton?.dataset.toggleStatus || deleteButton?.dataset.delete || detailButton?.dataset.userDetail;
   if (!userId) return;
 
   const user = state.users.find((item) => item.id === userId);
   if (!user) return;
 
   try {
+    if (detailButton) {
+      renderUserDetailModal(user);
+      return;
+    }
     if (roleButton) {
       await updateAdminUser(user, { role: user.role === 'admin' ? 'user' : 'admin' });
       showToast('用户身份已更新。');
@@ -733,14 +812,20 @@ window.addEventListener('message', (event) => {
   try {
     await refreshHealth();
     if (state.sessionToken) {
+      const storedUser = readStoredUser();
+      if (storedUser) {
+        state.currentUser = storedUser;
+        updateShell();
+      }
       try {
         const payload = await api('me');
         state.currentUser = payload.user;
+        persistSession(state.currentUser, state.sessionToken);
         updateShell();
         return;
       } catch (error) {
         state.sessionToken = '';
-        localStorage.removeItem(SESSION_TOKEN_KEY);
+        clearStoredSession();
       }
     }
     const twikooEmail = detectTwikooEmail();
