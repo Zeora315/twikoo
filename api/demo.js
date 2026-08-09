@@ -17,6 +17,8 @@ const DEFAULT_ALLOWED_ORIGINS = [
   'http://127.0.0.1:4000',
   'http://localhost:4011',
   'http://127.0.0.1:4011',
+  'http://localhost:4317',
+  'http://127.0.0.1:4317',
 ];
 
 const memoryStore = global.__twikooUserDemoStore || {
