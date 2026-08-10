@@ -7,6 +7,7 @@ const twikooVercel = require('twikoo-vercel');
 const FRONTEND_FILES = new Map([
   ['index.html', 'text/html; charset=utf-8'],
   ['styles.css', 'text/css; charset=utf-8'],
+  ['style.css', 'text/css; charset=utf-8'],
   ['app.js', 'application/javascript; charset=utf-8'],
 ]);
 
@@ -15,8 +16,18 @@ function getRequestPath(req) {
   return new URL(req.url, `https://${host}`).pathname;
 }
 
-function serveUserCenterFile(req, res, pathname) {
+function getRequestUrl(req) {
+  const host = req.headers.host || 'localhost';
+  return new URL(req.url, `https://${host}`);
+}
+
+function serveFrontendFile(req, res, pathname) {
+  const url = getRequestUrl(req);
+  const isOauth = pathname === '/oauth' || pathname.startsWith('/oauth/') || url.searchParams.get('comment_auth') === '1';
+  const rootDir = isOauth ? 'oauth' : 'user-center';
   const isEntry =
+    pathname === '/oauth' ||
+    pathname === '/oauth/' ||
     pathname === '/user-center' ||
     pathname === '/user-center/' ||
     pathname === '/admin' ||
@@ -26,7 +37,7 @@ function serveUserCenterFile(req, res, pathname) {
     /^\/user\/[^/]+\/?$/.test(pathname);
   const requestedFile = isEntry
     ? 'index.html'
-    : pathname.replace(/^\/(user-center|admin)\/?/, '');
+    : pathname.replace(/^\/(user-center|admin|oauth)\/?/, '');
 
   if (!FRONTEND_FILES.has(requestedFile)) {
     res.statusCode = 404;
@@ -34,7 +45,7 @@ function serveUserCenterFile(req, res, pathname) {
     return;
   }
 
-  const filePath = path.join(process.cwd(), 'public', 'user-center', requestedFile);
+  const filePath = path.join(process.cwd(), 'public', rootDir, requestedFile);
   const content = fs.readFileSync(filePath);
 
   res.statusCode = 200;
@@ -55,10 +66,12 @@ module.exports = async function twikooWithDemo(req, res) {
     pathname.startsWith('/user-center/') ||
     pathname === '/admin' ||
     pathname.startsWith('/admin/') ||
+    pathname === '/oauth' ||
+    pathname.startsWith('/oauth/') ||
     pathname === '/user' ||
     pathname.startsWith('/user/')
   ) {
-    return serveUserCenterFile(req, res, pathname);
+    return serveFrontendFile(req, res, pathname);
   }
 
   return twikooVercel(req, res);

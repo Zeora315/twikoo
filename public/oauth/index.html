@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HeoID 授权登录</title>
+    <link rel="stylesheet" href="/oauth/style.css" />
+  </head>
+  <body>
+    <button class="oauth-close" type="button" data-close aria-label="关闭授权页">×</button>
+
+    <main class="oauth-shell">
+      <section class="oauth-card" aria-live="polite">
+        <header class="brand-lockup" aria-label="HeoID">
+          <span class="brand-mark" aria-hidden="true">
+            <span></span>
+          </span>
+          <strong>HeoID</strong>
+        </header>
+
+        <section id="loadingView" class="state-view">
+          <h1>正在检查登录状态</h1>
+          <p>请稍候，正在连接评论账号服务。</p>
+        </section>
+
+        <section id="loginView" class="state-view hidden">
+          <h1>登录到 <span data-site-name>博客</span> 评论系统</h1>
+          <p class="lead">使用你的 HeoID 账号完成评论身份验证。</p>
+
+          <form id="emailForm" class="oauth-form">
+            <label>
+              <span>邮箱</span>
+              <input id="emailInput" name="email" type="email" required autocomplete="email" placeholder="name@example.com" />
+            </label>
+            <button class="primary-btn" type="submit">下一步</button>
+          </form>
+
+          <form id="passwordForm" class="oauth-form hidden">
+            <label>
+              <span>密码</span>
+              <input name="password" type="password" required autocomplete="current-password" />
+            </label>
+            <div class="form-actions">
+              <button class="primary-btn" type="submit">登录</button>
+              <button class="quiet-btn" type="button" data-back-email>上一步</button>
+            </div>
+          </form>
+
+          <form id="registerForm" class="oauth-form hidden">
+            <label>
+              <span>用户名</span>
+              <input name="username" required minlength="3" maxlength="32" autocomplete="username" placeholder="new_user" />
+            </label>
+            <label>
+              <span>显示名称</span>
+              <input name="displayName" maxlength="64" autocomplete="name" placeholder="你的昵称" />
+            </label>
+            <label>
+              <span>密码</span>
+              <input name="password" type="password" required minlength="8" autocomplete="new-password" placeholder="至少 8 位" />
+            </label>
+            <div class="form-actions">
+              <button class="primary-btn" type="submit">注册并授权</button>
+              <button class="quiet-btn" type="button" data-back-email>上一步</button>
+            </div>
+          </form>
+
+          <button id="modeSwitch" class="switch-account" type="button" data-mode="register">没有账号？注册</button>
+        </section>
+
+        <section id="consentView" class="state-view hidden">
+          <h1>你即将登录到 <span data-site-name>博客</span> 评论系统</h1>
+
+          <div class="user-row">
+            <span id="userAvatar" class="avatar" aria-hidden="true">Z</span>
+            <span>
+              <strong id="userName">Zeora</strong>
+              <small id="userUid">HeoID: 0000</small>
+            </span>
+          </div>
+
+          <div class="permission-card" aria-label="应用权限">
+            <p>此应用将获得以下权限</p>
+            <ul>
+              <li>
+                <span>获取用户基本信息</span>
+                <button type="button" aria-label="获取用户基本信息说明">ⓘ</button>
+              </li>
+              <li>
+                <span>发送通知</span>
+                <button type="button" aria-label="发送通知说明">ⓘ</button>
+              </li>
+              <li>
+                <span>获取邮箱地址</span>
+                <button type="button" aria-label="获取邮箱地址说明">ⓘ</button>
+              </li>
+            </ul>
+          </div>
+
+          <button id="authorizeBtn" class="confirm-btn" type="button">确认登录</button>
+          <button class="switch-account" type="button" data-use-other>使用其他账户登录</button>
+        </section>
+
+        <section id="returningView" class="state-view hidden">
+          <h1>正在返回评论区</h1>
+          <p>授权已完成，正在把登录状态同步到评论框。</p>
+          <button id="retryReturnBtn" class="primary-btn" type="button">重试返回</button>
+        </section>
+
+        <p id="message" class="message" role="status"></p>
+      </section>
+    </main>
+
+    <script src="/oauth/app.js?v=20260810-oauth1" defer></script>
+  </body>
+</html>

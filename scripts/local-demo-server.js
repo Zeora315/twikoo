@@ -6,14 +6,14 @@ const demoApi = require('../api/demo');
 
 const host = process.env.HOST || '127.0.0.1';
 const port = Number(process.env.PORT || 4317);
-const publicDir = path.join(__dirname, '..', 'public', 'user-center');
 const mimeTypes = {
   '.html': 'text/html; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.js': 'application/javascript; charset=utf-8',
 };
 
-function sendFile(res, fileName) {
+function sendFile(res, rootDir, fileName) {
+  const publicDir = path.join(__dirname, '..', 'public', rootDir);
   const filePath = path.join(publicDir, fileName);
   const ext = path.extname(fileName);
 
@@ -52,12 +52,22 @@ const server = http.createServer((req, res) => {
     url.pathname === '/user/' ||
     /^\/user\/[^/]+\/?$/.test(url.pathname)
   ) {
-    sendFile(res, 'index.html');
+    sendFile(res, url.searchParams.get('comment_auth') === '1' ? 'oauth' : 'user-center', 'index.html');
+    return;
+  }
+
+  if (url.pathname === '/oauth' || url.pathname === '/oauth/') {
+    sendFile(res, 'oauth', 'index.html');
     return;
   }
 
   if (url.pathname.startsWith('/user-center/') || url.pathname.startsWith('/admin/')) {
-    sendFile(res, url.pathname.replace(/^\/(user-center|admin)\//, ''));
+    sendFile(res, 'user-center', url.pathname.replace(/^\/(user-center|admin)\//, ''));
+    return;
+  }
+
+  if (url.pathname.startsWith('/oauth/')) {
+    sendFile(res, 'oauth', url.pathname.replace(/^\/oauth\//, ''));
     return;
   }
 
