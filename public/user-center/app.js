@@ -59,6 +59,7 @@ const els = {
   actionGrid: document.querySelector('.action-grid'),
   adminCard: document.querySelector('#adminCard'),
   logoutBtn: document.querySelector('#logoutBtn'),
+  commentCenterReturn: document.querySelector('#commentCenterReturn'),
   modalRoot: document.querySelector('#modalRoot'),
   toast: document.querySelector('#toast'),
 };
@@ -328,6 +329,7 @@ function updateShell() {
 
   els.authView.classList.add('hidden');
   els.centerView.classList.remove('hidden');
+  els.commentCenterReturn?.classList.toggle('hidden', !state.commentAuth);
   setAvatar(els.profileAvatar, user);
   els.profileName.textContent = user.displayName;
   els.profileUid.textContent = `UID: ${user.uid || user.id.slice(0, 5)}`;
@@ -364,6 +366,7 @@ function openCommentAuthorizeDialog() {
         <button class="primary-btn authorize-login-btn" type="button" data-comment-authorize>允许</button>
         <button class="ghost-btn" type="button" data-close-modal>暂不</button>
       </div>
+      <a class="center-return-link" href="/admin" target="_self">返回用户中心</a>
     </div>
   `);
 }
@@ -389,6 +392,7 @@ function authorizeCommentArea() {
   };
 
   window.parent.postMessage(payload, state.parentOrigin || '*');
+  if (state.parentOrigin) window.parent.postMessage({ ...payload, fallback: true }, '*');
   if (state.parentOrigin) {
     setTimeout(() => {
       if (!state.parentAuthorized) window.parent.postMessage({ ...payload, fallback: true }, '*');
