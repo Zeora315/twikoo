@@ -3,7 +3,7 @@
     "demo": "node scripts/local-demo-server.js"
   },
   "dependencies": {
-    "mongodb": "^6.8.0",
+    "mongodb": "^7.5.0",
     "nodemailer": "^6.9.16",
     "twikoo-vercel": "1.7.14"
   }
