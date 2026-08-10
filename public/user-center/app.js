@@ -33,9 +33,7 @@ const state = {
   parentOrigin: normalizeOrigin(params.get('origin')) || normalizeOrigin(document.referrer),
   parentAuthorized: false,
   commentAuthCompleted: false,
-  commentAuthSending: false,
   commentAuthorizePromptShown: false,
-  authReturnTimer: null,
   siteName: params.get('site') || '',
   publicProfileHandle: readPublicProfileHandle(),
   filter: { query: '', role: 'all', status: 'all' },
@@ -45,7 +43,6 @@ const els = {
   authView: document.querySelector('#authView'),
   centerView: document.querySelector('#centerView'),
   publicProfileView: document.querySelector('#publicProfileView'),
-  authTitle: document.querySelector('#authTitle'),
   authSwitchText: document.querySelector('#authSwitchText'),
   authSwitchBtn: document.querySelector('#authSwitchBtn'),
   authEmailForm: document.querySelector('#authEmailForm'),
@@ -58,7 +55,6 @@ const els = {
   profileUid: document.querySelector('#profileUid'),
   profileJoined: document.querySelector('#profileJoined'),
   profileEmail: document.querySelector('#profileEmail'),
-  profileHero: document.querySelector('.profile-hero'),
   roleBadge: document.querySelector('#roleBadge'),
   actionGrid: document.querySelector('.action-grid'),
   adminCard: document.querySelector('#adminCard'),
@@ -177,11 +173,12 @@ function setAuthMode(mode) {
   els.authCodeForm.classList.add('hidden');
   els.authPasswordForm.classList.add('hidden');
   els.authRegisterForm.classList.add('hidden');
-  els.authTitle.textContent = mode === 'login' ? '登录' : '注册';
-  els.authSwitchText.classList.remove('hidden');
-  els.authSwitchText.firstChild.textContent = mode === 'login' ? '没有账号？' : '已有账号？';
-  els.authSwitchBtn.textContent = mode === 'login' ? '注册' : '登录';
-  els.authSwitchBtn.dataset.authMode = mode === 'login' ? 'register' : 'login';
+  els.authSwitchText.classList.toggle('hidden', state.commentAuth);
+  if (!state.commentAuth) {
+    els.authSwitchText.firstChild.textContent = mode === 'login' ? '没有账号？' : '已有账号？';
+    els.authSwitchBtn.textContent = mode === 'login' ? '注册' : '登录';
+    els.authSwitchBtn.dataset.authMode = mode === 'login' ? 'register' : 'login';
+  }
   requestAnimationFrame(() => els.authEmailInput.focus());
 }
 
@@ -281,7 +278,7 @@ function renderPublicProfile(user) {
   const websiteUrl = user.websiteUrl || '';
   const contactEmail = user.contactEmail || '';
   els.publicProfileView.innerHTML = `
-    <a class="public-back" href="/admin" aria-label="返回用户中心">← HeoID</a>
+    <a class="public-back" href="/admin" aria-label="返回用户中心">← 用户中心</a>
     <article class="public-profile-card">
       ${avatarHtml(user, 'public-avatar')}
       <h1>${escapeHtml(user.displayName || user.username)}</h1>
@@ -309,7 +306,7 @@ async function loadPublicProfile() {
   } catch (error) {
     els.publicProfileView.classList.remove('hidden');
     els.publicProfileView.innerHTML = `
-      <a class="public-back" href="/admin" aria-label="返回用户中心">← HeoID</a>
+      <a class="public-back" href="/admin" aria-label="返回用户中心">← 用户中心</a>
       <article class="public-profile-card">
         <div class="public-avatar" aria-hidden="true">?</div>
         <h1>用户不存在</h1>
@@ -326,15 +323,13 @@ function updateShell() {
     els.authView.classList.remove('hidden');
     els.centerView.classList.add('hidden');
     document.querySelector('#commentAuthPanel')?.remove();
-    els.profileHero?.classList.remove('hidden');
-    els.actionGrid.classList.remove('hidden');
     closeModal();
     return;
   }
 
   els.authView.classList.add('hidden');
   els.centerView.classList.remove('hidden');
-  els.commentCenterReturn?.classList.add('hidden');
+  els.commentCenterReturn?.classList.toggle('hidden', !state.commentAuth);
   setAvatar(els.profileAvatar, user);
   els.profileName.textContent = user.displayName;
   els.profileUid.textContent = `UID: ${user.uid || user.id.slice(0, 5)}`;
@@ -344,53 +339,36 @@ function updateShell() {
   if (existingBio) existingBio.textContent = user.bio || '还没有填写个人简介';
   els.roleBadge.classList.toggle('hidden', user.role !== 'admin');
   els.adminCard.classList.toggle('hidden', user.role !== 'admin');
+  els.actionGrid.classList.toggle('hidden', state.commentAuth);
   if (state.commentAuth) {
-    closeModal();
-    els.profileHero?.classList.add('hidden');
-    els.actionGrid.classList.add('hidden');
-    renderCommentAuthPanel();
+    document.querySelector('#commentAuthPanel')?.remove();
+    requestAnimationFrame(openCommentAuthorizeDialog);
   } else {
-    els.profileHero?.classList.remove('hidden');
-    els.actionGrid.classList.remove('hidden');
     document.querySelector('#commentAuthPanel')?.remove();
   }
 }
 
-function renderCommentAuthPanel() {
-  if (!state.commentAuth || !state.currentUser) return;
+function openCommentAuthorizeDialog() {
+  if (!state.commentAuth || !state.currentUser || state.commentAuthorizePromptShown) return;
+  state.commentAuthorizePromptShown = true;
   const user = state.currentUser;
-  let panel = document.querySelector('#commentAuthPanel');
-  if (!panel) {
-    panel = document.createElement('section');
-    panel.id = 'commentAuthPanel';
-    panel.className = 'comment-auth-panel';
-    els.centerView.prepend(panel);
-  }
-  const statusText = state.commentAuthSending
-    ? '正在把登录状态同步到评论框。'
-    : `${state.siteName || '当前博客'} 将使用你的昵称、头像和邮箱发表评论。`;
-  panel.innerHTML = `
-    <div class="comment-auth-kicker">授权登录</div>
-    <h1>你即将登录到 ${escapeHtml(state.siteName || '当前博客')} 评论系统</h1>
-    <div class="comment-auth-user">
-      ${avatarHtml(user, 'consent-avatar')}
-      <span>
-        <strong>${escapeHtml(user.displayName || user.username)}</strong>
-        <small>UID: ${escapeHtml(user.uid || user.id.slice(0, 5))}</small>
-      </span>
+  openModal('是否授权博客评论？', `
+    <div class="comment-consent">
+      <div class="consent-user">
+        ${avatarHtml(user, 'consent-avatar')}
+        <span>
+          <strong>${escapeHtml(user.displayName || user.username)}</strong>
+          <small>UID: ${escapeHtml(user.uid || user.id.slice(0, 5))}</small>
+        </span>
+      </div>
+      <p>${escapeHtml(state.siteName || '当前博客')} 将使用你的昵称、头像和邮箱发表评论。</p>
+      <div class="form-actions consent-actions">
+        <button class="primary-btn authorize-login-btn" type="button" data-comment-authorize>允许</button>
+        <button class="ghost-btn" type="button" data-close-modal>暂不</button>
+      </div>
+      <a class="center-return-link" href="/admin" target="_self">返回用户中心</a>
     </div>
-    <div class="permission-card" aria-label="应用权限">
-      <p>此应用将获得以下权限</p>
-      <ul class="permission-list">
-        <li>获取用户基本信息</li>
-        <li>发送通知</li>
-        <li>获取邮箱地址</li>
-      </ul>
-    </div>
-    <button class="authorize-login-btn" type="button" data-comment-authorize>${state.commentAuthSending ? '正在返回' : '确认登录'}</button>
-    <button class="switch-account-btn" type="button" data-comment-switch-account>使用其他账户登录</button>
-    <p id="commentAuthStatus" class="comment-auth-status">${escapeHtml(statusText)}</p>
-  `;
+  `);
 }
 
 function authorizeCommentArea() {
@@ -398,7 +376,8 @@ function authorizeCommentArea() {
     showToast('请先登录后再授权。', true);
     return;
   }
-  if (state.commentAuthSending) return;
+  if (state.commentAuthCompleted) return;
+  state.commentAuthCompleted = true;
 
   if (window.parent === window) {
     showToast('已登录，可回到评论区继续。');
@@ -406,47 +385,21 @@ function authorizeCommentArea() {
   }
 
   state.parentAuthorized = false;
-  state.commentAuthSending = true;
-  state.commentAuthCompleted = false;
   const payload = {
     type: 'ZEORA_TWIKOO_COMMENT_AUTH',
     user: state.currentUser,
     sessionToken: state.sessionToken,
-    source: 'user-center',
-    sentAt: Date.now(),
   };
 
-  let attempts = 0;
-  clearInterval(state.authReturnTimer);
-  renderCommentAuthPanel();
-  const sendOnce = () => {
-    attempts += 1;
-    try {
-      window.parent.postMessage(payload, state.parentOrigin || '*');
-    } catch (error) {
-      window.parent.postMessage(payload, '*');
-    }
-    if (state.parentOrigin) {
-      window.setTimeout(() => {
-        if (!state.parentAuthorized) window.parent.postMessage({ ...payload, fallback: true }, '*');
-      }, 80);
-    }
-    if (state.parentAuthorized || attempts >= 24) {
-      clearInterval(state.authReturnTimer);
-      state.authReturnTimer = null;
-      state.commentAuthSending = false;
-      if (state.parentAuthorized) {
-        state.commentAuthCompleted = true;
-        return;
-      }
-      renderCommentAuthPanel();
-      const status = document.querySelector('#commentAuthStatus');
-      if (status) status.textContent = '如果没有自动返回，请再点一次“确认登录”。';
-    }
-  };
-
-  sendOnce();
-  state.authReturnTimer = setInterval(sendOnce, 220);
+  window.parent.postMessage(payload, state.parentOrigin || '*');
+  if (state.parentOrigin) window.parent.postMessage({ ...payload, fallback: true }, '*');
+  if (state.parentOrigin) {
+    setTimeout(() => {
+      if (!state.parentAuthorized) window.parent.postMessage({ ...payload, fallback: true }, '*');
+    }, 450);
+  }
+  closeModal();
+  showToast('已登录，正在返回评论区。');
 }
 
 async function refreshHealth() {
@@ -833,9 +786,6 @@ els.logoutBtn.addEventListener('click', () => {
   state.users = [];
   state.commentAuthorizePromptShown = false;
   state.commentAuthCompleted = false;
-  state.commentAuthSending = false;
-  clearInterval(state.authReturnTimer);
-  state.authReturnTimer = null;
   clearStoredSession();
   updateShell();
   showToast('已退出登录。');
@@ -927,20 +877,6 @@ els.modalRoot.addEventListener('submit', async (event) => {
 
 document.addEventListener('click', (event) => {
   if (event.target.closest('[data-comment-authorize]')) authorizeCommentArea();
-  if (event.target.closest('[data-comment-switch-account]')) {
-    state.currentUser = null;
-    state.credentials = null;
-    state.sessionToken = '';
-    state.users = [];
-    state.commentAuthorizePromptShown = false;
-    state.commentAuthCompleted = false;
-    state.commentAuthSending = false;
-    clearInterval(state.authReturnTimer);
-    state.authReturnTimer = null;
-    clearStoredSession();
-    setAuthMode('login');
-    updateShell();
-  }
 });
 
 document.addEventListener('keydown', (event) => {
@@ -950,9 +886,6 @@ document.addEventListener('keydown', (event) => {
 window.addEventListener('message', (event) => {
   if (event.data?.type === 'ZEORA_TWIKOO_COMMENT_AUTH_ACK') {
     state.parentAuthorized = true;
-    state.commentAuthCompleted = true;
-    clearInterval(state.authReturnTimer);
-    state.authReturnTimer = null;
   }
 });
 
@@ -960,7 +893,7 @@ window.addEventListener('message', (event) => {
   document.body.classList.toggle('is-comment-auth', state.commentAuth);
   document.body.classList.toggle('is-public-profile', Boolean(state.publicProfileHandle));
   const siteTitle = document.querySelector('#authTitle');
-  if (siteTitle) siteTitle.textContent = '登录';
+  if (state.siteName && siteTitle) siteTitle.textContent = state.siteName;
 
   try {
     await refreshHealth();

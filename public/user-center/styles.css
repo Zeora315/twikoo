@@ -335,94 +335,27 @@ p {
 }
 
 .comment-auth-panel {
-  width: min(420px, 100%);
-  justify-self: center;
   display: grid;
-  justify-items: center;
-  gap: 22px;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-  padding: 0;
-  text-align: center;
+  gap: 18px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--card);
+  box-shadow: var(--shadow);
+  padding: 24px;
 }
 
-.comment-auth-kicker {
-  min-height: 34px;
-  border-radius: 999px;
-  background: #eef2ff;
-  color: var(--blue);
-  padding: 6px 14px;
-  font-size: 14px;
-  font-weight: 900;
-}
-
-.comment-auth-panel h1 {
-  max-width: 380px;
-  margin: 0;
+.comment-auth-copy h2 {
+  margin: 0 0 6px;
   color: var(--ink);
-  font-size: 20px;
-  line-height: 1.45;
-  font-weight: 900;
+  font-size: 28px;
+  line-height: 1.15;
 }
 
-.comment-auth-status {
+.comment-auth-copy p,
+.comment-auth-account {
   margin: 0;
   color: var(--muted);
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.comment-auth-user {
-  display: grid;
-  grid-template-columns: 48px minmax(0, 1fr);
-  align-items: center;
-  gap: 13px;
-  width: min(260px, 100%);
-  text-align: left;
-}
-
-.comment-auth-user span,
-.comment-auth-user strong,
-.comment-auth-user small {
-  min-width: 0;
-}
-
-.comment-auth-user strong,
-.comment-auth-user small {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.comment-auth-user strong {
-  color: var(--ink);
   font-size: 14px;
-}
-
-.comment-auth-user small {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.permission-card {
-  width: min(372px, 100%);
-  display: grid;
-  gap: 8px;
-  border-radius: 15px;
-  background: #f0f2f6;
-  padding: 14px 16px;
-  text-align: left;
-}
-
-.permission-card p {
-  margin: 0;
-  color: #707888;
-  font-size: 12px;
-  font-weight: 800;
 }
 
 .permission-list {
@@ -434,57 +367,35 @@ p {
 }
 
 .permission-list li {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
+  display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 28px;
-  border-radius: 0;
-  background: transparent;
-  color: #242a35;
-  padding: 0;
-  font-size: 13px;
-  font-weight: 900;
+  min-height: 42px;
+  border-radius: 14px;
+  background: #f6f8fd;
+  color: #4a505b;
+  padding: 10px 12px;
+  font-weight: 800;
 }
 
 .permission-list li::before {
-  content: "✓";
-  width: auto;
-  height: auto;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-  color: var(--good);
-  font-weight: 900;
+  content: "";
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--blue);
+  box-shadow: 0 0 0 5px rgba(36, 72, 255, 0.1);
+  flex: none;
 }
 
 .authorize-login-btn {
   width: 100%;
-  min-height: 48px;
-  border: 0;
-  border-radius: 999px;
   background: var(--ink);
-  color: #fff;
   box-shadow: none;
-  font-weight: 900;
 }
 
 .authorize-login-btn:hover {
   background: #1f2228;
-}
-
-.switch-account-btn {
-  min-height: 34px;
-  border: 0;
-  background: transparent;
-  color: #7d8491;
-  padding: 0 12px;
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.switch-account-btn:hover {
-  color: var(--blue);
 }
 
 body.is-comment-auth {

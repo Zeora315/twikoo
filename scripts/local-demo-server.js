@@ -52,12 +52,12 @@ const server = http.createServer((req, res) => {
     url.pathname === '/user/' ||
     /^\/user\/[^/]+\/?$/.test(url.pathname)
   ) {
-    sendFile(res, 'user-center', 'index.html');
+    sendFile(res, url.searchParams.get('comment_auth') === '1' ? 'oauth' : 'user-center', 'index.html');
     return;
   }
 
   if (url.pathname === '/oauth' || url.pathname === '/oauth/') {
-    sendFile(res, 'user-center', 'index.html');
+    sendFile(res, 'oauth', 'index.html');
     return;
   }
 
@@ -67,7 +67,7 @@ const server = http.createServer((req, res) => {
   }
 
   if (url.pathname.startsWith('/oauth/')) {
-    sendFile(res, 'user-center', url.pathname.replace(/^\/oauth\//, ''));
+    sendFile(res, 'oauth', url.pathname.replace(/^\/oauth\//, ''));
     return;
   }
 
