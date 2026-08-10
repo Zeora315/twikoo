@@ -33,6 +33,7 @@ const state = {
   parentOrigin: normalizeOrigin(params.get('origin')) || normalizeOrigin(document.referrer),
   parentAuthorized: false,
   commentAuthCompleted: false,
+  commentAuthorizePromptShown: false,
   siteName: params.get('site') || '',
   publicProfileHandle: readPublicProfileHandle(),
   filter: { query: '', role: 'all', status: 'all' },
@@ -339,10 +340,32 @@ function updateShell() {
   els.actionGrid.classList.toggle('hidden', state.commentAuth);
   if (state.commentAuth) {
     document.querySelector('#commentAuthPanel')?.remove();
-    authorizeCommentArea();
+    requestAnimationFrame(openCommentAuthorizeDialog);
   } else {
     document.querySelector('#commentAuthPanel')?.remove();
   }
+}
+
+function openCommentAuthorizeDialog() {
+  if (!state.commentAuth || !state.currentUser || state.commentAuthorizePromptShown) return;
+  state.commentAuthorizePromptShown = true;
+  const user = state.currentUser;
+  openModal('是否授权博客评论？', `
+    <div class="comment-consent">
+      <div class="consent-user">
+        ${avatarHtml(user, 'consent-avatar')}
+        <span>
+          <strong>${escapeHtml(user.displayName || user.username)}</strong>
+          <small>HeoID: ${escapeHtml(user.uid || user.id.slice(0, 5))}</small>
+        </span>
+      </div>
+      <p>${escapeHtml(state.siteName || '当前博客')} 将使用你的昵称、头像和邮箱发表评论。</p>
+      <div class="form-actions consent-actions">
+        <button class="primary-btn authorize-login-btn" type="button" data-comment-authorize>允许</button>
+        <button class="ghost-btn" type="button" data-close-modal>暂不</button>
+      </div>
+    </div>
+  `);
 }
 
 function authorizeCommentArea() {
@@ -384,7 +407,7 @@ async function login(credentials, silent = false) {
   const result = await api('login', { method: 'POST', body: credentials });
   setAuthenticated(result, credentials);
   updateShell();
-  if (!silent && !state.commentAuth) showToast('已进入用户中心。');
+  if (!silent) showToast(state.commentAuth ? '已登录，请确认授权。' : '已进入用户中心。');
 }
 
 function setAuthenticated(result, credentials = null) {
@@ -739,7 +762,7 @@ els.authRegisterForm.addEventListener('submit', async (event) => {
     const body = { ...formData(els.authRegisterForm), email: state.authEmail };
     await api('register', { method: 'POST', body });
     await login({ email: body.email, password: body.password });
-    showToast('注册成功，已进入用户中心。');
+    if (!state.commentAuth) showToast('注册成功，已进入用户中心。');
   } catch (error) {
     showToast(error.message, true);
   } finally {
@@ -757,6 +780,8 @@ els.logoutBtn.addEventListener('click', () => {
   state.credentials = null;
   state.sessionToken = '';
   state.users = [];
+  state.commentAuthorizePromptShown = false;
+  state.commentAuthCompleted = false;
   clearStoredSession();
   updateShell();
   showToast('已退出登录。');
@@ -844,6 +869,10 @@ els.modalRoot.addEventListener('submit', async (event) => {
   } finally {
     submitter.disabled = false;
   }
+});
+
+document.addEventListener('click', (event) => {
+  if (event.target.closest('[data-comment-authorize]')) authorizeCommentArea();
 });
 
 document.addEventListener('keydown', (event) => {
