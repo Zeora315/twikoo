@@ -22,9 +22,7 @@ function getRequestUrl(req) {
 }
 
 function serveFrontendFile(req, res, pathname) {
-  const url = getRequestUrl(req);
-  const isOauth = pathname === '/oauth' || pathname.startsWith('/oauth/') || url.searchParams.get('comment_auth') === '1';
-  const rootDir = isOauth ? 'oauth' : 'user-center';
+  const rootDir = 'user-center';
   const isEntry =
     pathname === '/oauth' ||
     pathname === '/oauth/' ||
