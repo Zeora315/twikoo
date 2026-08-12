@@ -10,9 +10,6 @@
     <main class="oauth-shell">
       <section class="oauth-card" aria-live="polite">
         <header class="brand-lockup" aria-label="当前页面">
-          <span class="brand-mark" aria-hidden="true">
-            <span></span>
-          </span>
           <strong data-page-title>评论授权</strong>
         </header>
 
@@ -23,12 +20,30 @@
 
         <section id="loginView" class="state-view hidden">
           <h1>登录到 <span data-site-name>博客</span> 评论系统</h1>
-          <p class="lead">使用你的评论账号完成身份验证。</p>
+          <p class="lead">使用评论账号登录，昵称、头像和个人主页会同步到评论区。</p>
+
+          <div class="mode-tabs" role="tablist" aria-label="登录方式">
+            <button type="button" data-mode-tab="login" class="is-active">登录</button>
+            <button type="button" data-mode-tab="register">注册</button>
+            <button type="button" data-mode-tab="reset">忘记密码</button>
+          </div>
+
+          <div id="captchaStatus" class="security-pill hidden" aria-live="polite">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3 5.5 5.7v5.8c0 4 2.7 7.5 6.5 8.5 3.8-1 6.5-4.5 6.5-8.5V5.7L12 3Z" />
+              <path d="m9.4 12.2 1.8 1.8 3.6-4" />
+            </svg>
+            <span>站点人机验证已启用</span>
+          </div>
 
           <form id="emailForm" class="oauth-form">
             <label>
               <span>邮箱</span>
               <input id="emailInput" name="email" type="email" required autocomplete="email" placeholder="name@example.com" />
+            </label>
+            <label class="remember-row">
+              <input id="rememberMeInput" name="rememberMe" type="checkbox" checked />
+              <span>记住我，下次自动登录</span>
             </label>
             <button class="primary-btn" type="submit">下一步</button>
           </form>
@@ -45,6 +60,10 @@
           </form>
 
           <form id="registerForm" class="oauth-form hidden">
+            <label>
+              <span>邮箱验证码</span>
+              <input name="code" inputmode="numeric" pattern="\d{6}" maxlength="6" required autocomplete="one-time-code" placeholder="6 位验证码" />
+            </label>
             <label>
               <span>用户名</span>
               <input name="username" required minlength="3" maxlength="32" autocomplete="username" placeholder="new_user" />
@@ -63,7 +82,20 @@
             </div>
           </form>
 
-          <button id="modeSwitch" class="switch-account" type="button" data-mode="register">没有账号？注册</button>
+          <form id="resetForm" class="oauth-form hidden">
+            <label>
+              <span>邮箱验证码</span>
+              <input name="code" inputmode="numeric" pattern="\d{6}" maxlength="6" required autocomplete="one-time-code" placeholder="6 位验证码" />
+            </label>
+            <label>
+              <span>新密码</span>
+              <input name="newPassword" type="password" required minlength="8" autocomplete="new-password" placeholder="至少 8 位" />
+            </label>
+            <div class="form-actions">
+              <button class="primary-btn" type="submit">重置并登录</button>
+              <button class="quiet-btn" type="button" data-back-email>上一步</button>
+            </div>
+          </form>
         </section>
 
         <section id="consentView" class="state-view hidden">
@@ -80,23 +112,13 @@
           <div class="permission-card" aria-label="应用权限">
             <p>此应用将获得以下权限</p>
             <ul>
-              <li>
-                <span>获取用户基本信息</span>
-                <button type="button" aria-label="获取用户基本信息说明">ⓘ</button>
-              </li>
-              <li>
-                <span>发送通知</span>
-                <button type="button" aria-label="发送通知说明">ⓘ</button>
-              </li>
-              <li>
-                <span>获取邮箱地址</span>
-                <button type="button" aria-label="获取邮箱地址说明">ⓘ</button>
-              </li>
+              <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg><span>获取用户基本信息</span></li>
+              <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg><span>发送站内通知</span></li>
+              <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg><span>获取邮箱地址用于评论通知</span></li>
             </ul>
           </div>
 
           <button id="authorizeBtn" class="confirm-btn" type="button">确认登录</button>
-          <button class="switch-account" type="button" data-use-other>使用其他账户登录</button>
         </section>
 
         <section id="returningView" class="state-view hidden">
@@ -108,6 +130,6 @@
       </section>
     </main>
 
-    <script src="/oauth/app.js?v=20260810-oauth2" defer></script>
+    <script src="/oauth/app.js?v=20260810-oauth4" defer></script>
   </body>
 </html>

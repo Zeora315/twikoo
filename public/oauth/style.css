@@ -5,6 +5,7 @@
   --muted: #7a8291;
   --line: #e8ebf2;
   --soft: #f2f4f8;
+  --blue: #2448ff;
   --good: #18a058;
   --danger: #d64545;
   --focus: rgba(36, 72, 255, 0.26);
@@ -47,45 +48,24 @@ button {
   min-height: 100vh;
   display: grid;
   place-items: center;
-  padding: 40px 24px;
+  padding: 44px 24px;
 }
 
 .oauth-card {
-  width: min(420px, 100%);
+  width: min(430px, 100%);
   display: grid;
   justify-items: center;
-  gap: 28px;
-  padding: 28px 0;
+  gap: 24px;
+  padding: 30px 0;
   background: transparent;
   text-align: center;
 }
 
 .brand-lockup {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
+  display: block;
   color: #111827;
   font-size: 24px;
   font-weight: 900;
-}
-
-.brand-mark {
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 12px;
-  background: linear-gradient(145deg, #2a6df4 0%, #27b18a 52%, #172033 53%, #111827 100%);
-  box-shadow: 0 14px 26px rgba(27, 45, 82, 0.16);
-}
-
-.brand-mark span {
-  width: 15px;
-  height: 15px;
-  border: 3px solid #fff;
-  border-radius: 50%;
-  box-shadow: 10px 10px 0 -4px #fff;
 }
 
 .state-view {
@@ -117,8 +97,37 @@ button {
 .oauth-form {
   width: 100%;
   display: grid;
-  gap: 14px;
+  gap: 13px;
   text-align: left;
+}
+
+.mode-tabs {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.78);
+  padding: 4px;
+}
+
+.mode-tabs button {
+  min-width: 0;
+  min-height: 36px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: #6b7280;
+  padding: 0 8px;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.mode-tabs button.is-active {
+  background: #111827;
+  color: #fff;
+  box-shadow: 0 10px 22px rgba(17, 24, 39, 0.12);
 }
 
 .oauth-form label {
@@ -129,26 +138,74 @@ button {
   font-weight: 800;
 }
 
+.oauth-form .remember-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.oauth-form .remember-row input {
+  width: 18px;
+  min-height: 18px;
+  height: 18px;
+  accent-color: var(--blue);
+  padding: 0;
+}
+
+.security-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 36px;
+  border-radius: 999px;
+  background: #eef8f5;
+  color: var(--good);
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.security-pill svg,
+.permission-card svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .oauth-form input {
   width: 100%;
   min-height: 46px;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 13px;
   background: #fff;
   color: var(--text);
   padding: 0 14px;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
 }
 
+.oauth-form .remember-row input {
+  width: 18px;
+  min-height: 18px;
+  height: 18px;
+  flex: none;
+  accent-color: var(--blue);
+  padding: 0;
+}
+
 .oauth-form input:focus {
-  border-color: #2a6df4;
-  box-shadow: 0 0 0 4px rgba(42, 109, 244, 0.12);
+  border-color: var(--blue);
+  box-shadow: 0 0 0 4px rgba(36, 72, 255, 0.12);
   outline: 0;
 }
 
 .form-actions {
   display: grid;
-  gap: 10px;
+  gap: 9px;
 }
 
 .primary-btn,
@@ -195,12 +252,6 @@ button {
   gap: 7px;
   min-height: 36px;
   padding: 0 12px;
-}
-
-.switch-account::before {
-  content: "♙";
-  color: #8c94a3;
-  font-size: 13px;
 }
 
 .user-row {
@@ -279,7 +330,7 @@ button {
 
 .permission-card li {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) 20px;
+  grid-template-columns: 18px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   color: #242a35;
@@ -287,21 +338,8 @@ button {
   font-weight: 900;
 }
 
-.permission-card li::before {
-  content: "✓";
+.permission-card li svg {
   color: var(--good);
-  font-weight: 900;
-}
-
-.permission-card li button {
-  width: 20px;
-  height: 20px;
-  border: 0;
-  border-radius: 50%;
-  background: transparent;
-  color: #a0a8b6;
-  padding: 0;
-  font-size: 13px;
 }
 
 .message {

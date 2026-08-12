@@ -1,40 +1,47 @@
-const fs = require('fs');
 const http = require('http');
-const path = require('path');
 
 const demoApi = require('../api/demo');
 
 const host = process.env.HOST || '127.0.0.1';
 const port = Number(process.env.PORT || 4317);
-const mimeTypes = {
-  '.html': 'text/html; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.js': 'application/javascript; charset=utf-8',
-};
 
-function sendFile(res, rootDir, fileName) {
-  const publicDir = path.join(__dirname, '..', 'public', rootDir);
-  const filePath = path.join(publicDir, fileName);
-  const ext = path.extname(fileName);
+function sendApiOnlyNotice(res) {
+  res.statusCode = 404;
+  res.setHeader('content-type', 'application/json; charset=utf-8');
+  res.end(JSON.stringify({
+    ok: false,
+    message: 'Twikoo demo server only serves /api/demo. Login and user center UI live in the blog frontend.',
+  }));
+}
 
-  if (!filePath.startsWith(publicDir) || !fs.existsSync(filePath)) {
-    res.statusCode = 404;
-    res.end('Not found');
-    return;
-  }
+function profileRedirectHandle(pathname) {
+  const backendUser = pathname.match(/^\/user\/([^/]+)\/?$/);
+  if (backendUser) return decodeURIComponent(backendUser[1]).replace(/^@/, '').trim();
+  const frontendNested = pathname.match(/^\/user-center\/([^/]+)\/?$/);
+  if (frontendNested) return decodeURIComponent(frontendNested[1]).replace(/^@/, '').trim();
+  return '';
+}
 
-  res.statusCode = 200;
-  res.setHeader('content-type', mimeTypes[ext] || 'application/octet-stream');
-  res.end(fs.readFileSync(filePath));
+function redirectToFrontendProfile(req, res, handle) {
+  const origin = process.env.DEMO_FRONTEND_ORIGIN || process.env.FRONTEND_ORIGIN || req.headers.origin || 'http://localhost:4000';
+  const target = new URL('/user-center/', origin);
+  target.searchParams.set('user', handle);
+  res.statusCode = 302;
+  res.setHeader('location', target.toString());
+  res.end();
 }
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || `${host}:${port}`}`);
 
+  const handle = profileRedirectHandle(url.pathname);
+  if (handle) {
+    redirectToFrontendProfile(req, res, handle);
+    return;
+  }
+
   if (url.pathname === '/') {
-    res.statusCode = 302;
-    res.setHeader('location', '/user-center');
-    res.end();
+    sendApiOnlyNotice(res);
     return;
   }
 
@@ -43,38 +50,9 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  if (
-    url.pathname === '/user-center' ||
-    url.pathname === '/user-center/' ||
-    url.pathname === '/admin' ||
-    url.pathname === '/admin/' ||
-    url.pathname === '/user' ||
-    url.pathname === '/user/' ||
-    /^\/user\/[^/]+\/?$/.test(url.pathname)
-  ) {
-    sendFile(res, url.searchParams.get('comment_auth') === '1' ? 'oauth' : 'user-center', 'index.html');
-    return;
-  }
-
-  if (url.pathname === '/oauth' || url.pathname === '/oauth/') {
-    sendFile(res, 'oauth', 'index.html');
-    return;
-  }
-
-  if (url.pathname.startsWith('/user-center/') || url.pathname.startsWith('/admin/')) {
-    sendFile(res, 'user-center', url.pathname.replace(/^\/(user-center|admin)\//, ''));
-    return;
-  }
-
-  if (url.pathname.startsWith('/oauth/')) {
-    sendFile(res, 'oauth', url.pathname.replace(/^\/oauth\//, ''));
-    return;
-  }
-
-  res.statusCode = 404;
-  res.end('Not found');
+  sendApiOnlyNotice(res);
 });
 
 server.listen(port, host, () => {
-  console.log(`Twikoo user center demo: http://${host}:${port}/user-center`);
+  console.log(`Twikoo demo API: http://${host}:${port}/api/demo`);
 });
