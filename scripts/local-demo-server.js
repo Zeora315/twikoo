@@ -22,13 +22,34 @@ function profileRedirectHandle(pathname) {
   return '';
 }
 
-function redirectToFrontendProfile(req, res, handle) {
+function frontendOrigin(req) {
   const origin = process.env.DEMO_FRONTEND_ORIGIN || process.env.FRONTEND_ORIGIN || req.headers.origin || 'http://localhost:4000';
-  const target = new URL('/user-center/', origin);
-  target.searchParams.set('user', handle);
+  return origin.replace(/\/$/, '');
+}
+
+function redirectToFrontend(req, res, path = '/user-center/', handle = '') {
+  const target = new URL(path, frontendOrigin(req));
+  if (handle) target.searchParams.set('user', handle);
   res.statusCode = 302;
   res.setHeader('location', target.toString());
   res.end();
+}
+
+function redirectToFrontendProfile(req, res, handle) {
+  redirectToFrontend(req, res, '/user-center/', handle);
+}
+
+function isFrontendPagePath(pathname) {
+  return pathname === '/user-center' ||
+    pathname === '/user-center/' ||
+    pathname === '/admin' ||
+    pathname.startsWith('/admin/') ||
+    pathname === '/oauth' ||
+    pathname.startsWith('/oauth/') ||
+    pathname === '/settings' ||
+    pathname.startsWith('/settings/') ||
+    pathname === '/notifications' ||
+    pathname.startsWith('/notifications/');
 }
 
 const server = http.createServer((req, res) => {
@@ -37,6 +58,11 @@ const server = http.createServer((req, res) => {
   const handle = profileRedirectHandle(url.pathname);
   if (handle) {
     redirectToFrontendProfile(req, res, handle);
+    return;
+  }
+
+  if (isFrontendPagePath(url.pathname)) {
+    redirectToFrontend(req, res);
     return;
   }
 

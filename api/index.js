@@ -31,6 +31,10 @@ function frontendProfileUrl(req, handle) {
   return url.toString();
 }
 
+function frontendUserCenterUrl(req) {
+  return new URL('/user-center/', frontendOrigin(req)).toString();
+}
+
 function profileRedirectHandle(pathname) {
   const backendUser = pathname.match(/^\/user\/([^/]+)\/?$/);
   if (backendUser) return decodeURIComponent(backendUser[1]).replace(/^@/, '').trim();
@@ -86,7 +90,7 @@ module.exports = async function twikooWithDemo(req, res) {
   }
 
   if (isFrontendPagePath(pathname)) {
-    return sendApiOnlyNotice(res);
+    return redirect(res, frontendUserCenterUrl(req));
   }
 
   return twikooVercel(req, res);
