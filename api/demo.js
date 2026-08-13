@@ -19,9 +19,16 @@ const MAX_BACKGROUND_LENGTH = 240000;
 const MAX_BIO_LENGTH = 120;
 const MAX_BADGE_LENGTH = 20;
 const DEFAULT_ADMIN_BADGE_COLOR = '#ff5f63';
-const MAX_SOCIAL_LINKS = 12;
+const MAX_SOCIAL_LINKS = 5;
 const MAX_SOCIAL_LABEL_LENGTH = 24;
 const MAX_SOCIAL_URL_LENGTH = 300;
+const SHOP_REWARD_COST = 100;
+const SHOP_REWARD_ITEMS = {
+  quark: { label: '夸克网盘会员' },
+  bilibili: { label: 'B站大会员' },
+  tencent: { label: '腾讯视频会员' },
+  netease: { label: '网易云音乐会员' },
+};
 const CODE_TTL_MS = 10 * 60 * 1000;
 const CODE_RESEND_MS = 60 * 1000;
 const CODE_MAX_ATTEMPTS = 5;
@@ -243,6 +250,18 @@ function publicSocialLinks(value) {
     .slice(0, MAX_SOCIAL_LINKS);
 }
 
+function publicRedemptions(value) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(-20).map((item) => ({
+    id: cleanString(item?.id),
+    item: cleanString(item?.item),
+    itemLabel: cleanString(item?.itemLabel),
+    cost: positiveInteger(item?.cost),
+    status: cleanString(item?.status) || 'pending',
+    createdAt: item?.createdAt || '',
+  })).filter((item) => item.id && item.itemLabel);
+}
+
 function makeUsernameFromEmail(email) {
   const localPart = normalizeEmail(email).split('@')[0] || 'user';
   const cleaned = localPart.replace(/[^a-zA-Z0-9_.-]/g, '_').replace(/^[-_.]+|[-_.]+$/g, '');
@@ -349,7 +368,7 @@ function commentLevelStats(experienceValue) {
   let level = 1;
   let spent = 0;
 
-  while (experience >= spent + level && level < 99) {
+  while (experience >= spent + level && level < 9999) {
     spent += level;
     level += 1;
   }
@@ -370,7 +389,16 @@ function commentLevelStats(experienceValue) {
 }
 
 function userLevelStats(user) {
-  return commentLevelStats(user?.commentExperience || user?.commentCount || 0);
+  const stats = commentLevelStats(user?.commentExperience || user?.commentCount || 0);
+  const earned = Math.floor(stats.commentLevel / 10);
+  const spent = positiveInteger(user?.shopSpentPoints);
+  return {
+    ...stats,
+    commentPointsEarned: earned,
+    shopSpentPoints: spent,
+    commentPoints: Math.max(0, earned - spent),
+    shopRedemptions: publicRedemptions(user?.shopRedemptions),
+  };
 }
 
 function runtimeValue(config, keys) {
@@ -841,6 +869,24 @@ async function findUserByUid(collection, uid) {
   return memoryStore.users.find((user) => user.uid === uid);
 }
 
+async function findUserByIdentifier(collection, identifier) {
+  const value = cleanString(identifier).replace(/^@/, '');
+  if (!value) throw new HttpError(400, '请输入用户名、邮箱或 UID。');
+
+  if (value.includes('@')) {
+    const byEmail = await findUserByEmail(collection, validateEmail(value));
+    if (byEmail) return byEmail;
+  }
+
+  const byUid = await findUserByUid(collection, value);
+  if (byUid) return byUid;
+
+  const byUsername = await findUserByUsername(collection, value.toLowerCase());
+  if (byUsername) return byUsername;
+
+  return null;
+}
+
 async function findUserByPublicHandle(collection, handle) {
   const value = cleanString(handle).replace(/^@/, '');
   if (!value) throw new HttpError(400, '缺少用户 ID。');
@@ -1026,12 +1072,12 @@ async function touchLogin(collection, user) {
 }
 
 async function loginUser(collection, body, commentCollection) {
-  const emailLower = validateEmail(body.email);
+  const identifier = body.identifier || body.login || body.email || body.username || body.uid;
   const password = String(body.password || '');
-  const user = await findUserByEmail(collection, emailLower);
+  const user = await findUserByIdentifier(collection, identifier);
 
   if (!user || !verifyPassword(password, user)) {
-    throw new HttpError(401, '邮箱或密码不正确。');
+    throw new HttpError(401, '账号或密码不正确。');
   }
   if (user.status === 'blocked') {
     throw new HttpError(403, '该用户已被管理员停用。');
@@ -1309,7 +1355,7 @@ async function resetPasswordWithCode(userCollection, codeCollection, body) {
   };
 }
 
-function pickUserUpdates(body, allowRoleStatus) {
+function pickUserUpdates(body, allowRoleStatus, requireAny = true) {
   const updates = {};
 
   if (body.displayName !== undefined) {
@@ -1345,7 +1391,10 @@ function pickUserUpdates(body, allowRoleStatus) {
     updates.status = body.status;
   }
 
-  if (!Object.keys(updates).length) throw new HttpError(400, '没有可更新的字段。');
+  if (!Object.keys(updates).length) {
+    if (requireAny) throw new HttpError(400, '没有可更新的字段。');
+    return updates;
+  }
   updates.updatedAt = new Date().toISOString();
   return updates;
 }
@@ -1381,8 +1430,61 @@ async function updateProfile(collection, req, body) {
     if (!user || !verifyPassword(password, user)) throw new HttpError(401, '邮箱或密码不正确。');
   }
 
-  const updates = pickUserUpdates(body, false);
+  const updates = pickUserUpdates(body, false, false);
+  if (body.username !== undefined) {
+    const username = cleanString(body.username);
+    if (!/^[a-zA-Z0-9_.-]{3,32}$/.test(username)) {
+      throw new HttpError(400, '用户名需要 3-32 位，只能包含字母、数字、下划线、点或短横线。');
+    }
+    const usernameLower = username.toLowerCase();
+    const existing = await findUserByUsername(collection, usernameLower);
+    if (existing && existing.id !== user.id) throw new HttpError(409, '这个用户名已经被占用。');
+    updates.username = username;
+    updates.usernameLower = usernameLower;
+  }
+  if (!Object.keys(updates).length) throw new HttpError(400, '没有可更新的字段。');
+  updates.updatedAt = new Date().toISOString();
   return updateUser(collection, user.id, updates);
+}
+
+async function redeemReward(collection, req, body) {
+  const user = await requireSessionUser(collection, req, body);
+  const rewardKey = cleanString(body.reward || body.item || body.type).toLowerCase();
+  const reward = SHOP_REWARD_ITEMS[rewardKey];
+  if (!reward) throw new HttpError(400, '请选择有效的兑换商品。');
+
+  const stats = userLevelStats(user);
+  if (stats.commentPoints < SHOP_REWARD_COST) {
+    throw new HttpError(400, `积分不足，当前可用 ${stats.commentPoints} 分。`);
+  }
+
+  const now = new Date().toISOString();
+  const redemption = {
+    id: crypto.randomUUID(),
+    item: rewardKey,
+    itemLabel: reward.label,
+    cost: SHOP_REWARD_COST,
+    status: 'pending',
+    createdAt: now,
+  };
+
+  if (collection) {
+    await collection.updateOne(
+      { id: user.id },
+      {
+        $inc: { shopSpentPoints: SHOP_REWARD_COST },
+        $push: { shopRedemptions: { $each: [redemption], $slice: -20 } },
+        $set: { updatedAt: now },
+      }
+    );
+    const updated = await findUserById(collection, user.id);
+    return { user: toPublicUser(updated || user), redemption };
+  }
+
+  user.shopSpentPoints = positiveInteger(user.shopSpentPoints) + SHOP_REWARD_COST;
+  user.shopRedemptions = [...publicRedemptions(user.shopRedemptions), redemption].slice(-20);
+  user.updatedAt = now;
+  return { user: toPublicUser(user), redemption };
 }
 
 async function changePassword(collection, req, body) {
@@ -1900,6 +2002,11 @@ async function handle(req, res) {
 
   if (action === 'changePassword' && req.method === 'POST') {
     send(res, 200, { ok: true, user: await changePassword(collection, req, body) });
+    return;
+  }
+
+  if (action === 'redeemReward' && req.method === 'POST') {
+    send(res, 200, { ok: true, ...(await redeemReward(collection, req, body)) });
     return;
   }
 

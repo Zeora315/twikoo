@@ -10,7 +10,7 @@ function sendApiOnlyNotice(res) {
   res.setHeader('content-type', 'application/json; charset=utf-8');
   res.end(JSON.stringify({
     ok: false,
-    message: 'Twikoo demo server only serves /api/demo. Login and user center UI live in the blog frontend.',
+    message: 'Twikoo 后端仅提供 /api/demo；登录、注册和用户中心只保留在博客前端。',
   }));
 }
 
