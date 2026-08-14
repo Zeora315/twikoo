@@ -23,6 +23,9 @@ const DEFAULT_ADMIN_BADGE_COLOR = '#ff5f63';
 const MAX_SOCIAL_LINKS = 5;
 const MAX_SOCIAL_LABEL_LENGTH = 24;
 const MAX_SOCIAL_URL_LENGTH = 300;
+const USERNAME_CHANGE_INTERVAL_MS = 30 * 24 * 60 * 60 * 1000;
+const USERNAME_PATTERN = /^[a-zA-Z0-9_.-]{3,32}$/;
+const UID_PATTERN = /^[a-zA-Z0-9_-]{2,32}$/;
 const DEFAULT_SHOP_ITEMS = [
   { key: 'quark', name: '夸克网盘会员', price: 100, stock: 10, enabled: true },
   { key: 'bilibili', name: 'B站大会员', price: 100, stock: 10, enabled: true },
@@ -212,6 +215,22 @@ function validateOptionalEmail(email, label = '联系邮箱') {
 function validateBio(bio) {
   const value = cleanString(bio);
   if (value.length > MAX_BIO_LENGTH) throw new HttpError(400, `个人简介不能超过 ${MAX_BIO_LENGTH} 个字符。`);
+  return value;
+}
+
+function validateUsername(username) {
+  const value = cleanString(username);
+  if (!USERNAME_PATTERN.test(value)) {
+    throw new HttpError(400, '用户名需要 3-32 位，只能包含英文字母、数字、下划线、点或短横线。');
+  }
+  return value;
+}
+
+function validateUid(uid) {
+  const value = cleanString(uid);
+  if (!UID_PATTERN.test(value)) {
+    throw new HttpError(400, 'UID 需要 2-32 位，只能包含英文字母、数字、下划线或短横线。');
+  }
   return value;
 }
 
@@ -461,7 +480,7 @@ function makeUsernameFromEmail(email) {
 }
 
 function validateRegistration(body) {
-  const username = cleanString(body.username);
+  const username = validateUsername(body.username);
   const displayName = cleanString(body.displayName) || username;
   const email = validateEmail(body.email);
   const password = String(body.password || '');
@@ -472,9 +491,6 @@ function validateRegistration(body) {
   const contactEmail = validateOptionalEmail(body.contactEmail, '公开联系邮箱');
   const socialLinks = normalizeSocialLinks(body.socialLinks);
 
-  if (!/^[a-zA-Z0-9_.-]{3,32}$/.test(username)) {
-    throw new HttpError(400, '用户名需要 3-32 位，只能包含字母、数字、下划线、点或短横线。');
-  }
   if (displayName.length > 64) {
     throw new HttpError(400, '显示名称不能超过 64 个字符。');
   }
@@ -743,6 +759,7 @@ function toPublicUser(user) {
     role: user.role || 'user',
     status: user.status || 'active',
     notifications: user.notifications || defaultNotifications(),
+    usernameUpdatedAt: user.usernameUpdatedAt || null,
     ...level,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
@@ -1172,6 +1189,7 @@ async function registerUser(collection, body) {
     uid,
     username: input.username,
     usernameLower: input.usernameLower,
+    usernameUpdatedAt: now,
     displayName: input.displayName,
     email: input.email,
     emailLower: input.emailLower,
@@ -1476,10 +1494,7 @@ async function verifyLoginCode(userCollection, codeCollection, body) {
   let user = await findUserByEmail(userCollection, emailLower);
   let isNewUser = false;
   if (!user) {
-    const username = cleanString(body.username) || await createUniqueUsername(userCollection, emailLower);
-    if (!/^[a-zA-Z0-9_.-]{3,32}$/.test(username)) {
-      throw new HttpError(400, '用户名需要 3-32 位，只能包含字母、数字、下划线、点或短横线。');
-    }
+    const username = body.username ? validateUsername(body.username) : await createUniqueUsername(userCollection, emailLower);
 
     const displayName = cleanString(body.displayName) || username;
     if (displayName.length > 64) throw new HttpError(400, '显示名称不能超过 64 个字符。');
@@ -1492,6 +1507,7 @@ async function verifyLoginCode(userCollection, codeCollection, body) {
       uid,
       username,
       usernameLower: username.toLowerCase(),
+      usernameUpdatedAt: now,
       displayName,
       email: emailLower,
       emailLower,
@@ -1596,6 +1612,7 @@ function pickUserUpdates(body, allowRoleStatus, requireAny = true) {
   }
   if (allowRoleStatus && body.badgeLabel !== undefined) updates.badgeLabel = validateBadgeLabel(body.badgeLabel);
   if (allowRoleStatus && body.badgeColor !== undefined) updates.badgeColor = validateBadgeColor(body.badgeColor);
+  if (allowRoleStatus && body.uid !== undefined) updates.uid = validateUid(body.uid);
   if (allowRoleStatus && body.status !== undefined) {
     if (!['active', 'blocked'].includes(body.status)) throw new HttpError(400, '状态只能是 active 或 blocked。');
     updates.status = body.status;
@@ -1611,6 +1628,12 @@ function pickUserUpdates(body, allowRoleStatus, requireAny = true) {
 
 async function updateUser(collection, id, updates) {
   if (!id) throw new HttpError(400, '缺少用户 ID。');
+
+  if (updates.uid !== undefined) {
+    updates.uid = validateUid(updates.uid);
+    const existing = await findUserByUid(collection, updates.uid);
+    if (existing && existing.id !== id) throw new HttpError(409, '这个 UID 已经被占用。');
+  }
 
   if (collection) {
     const result = await collection.findOneAndUpdate(
@@ -1642,15 +1665,23 @@ async function updateProfile(collection, req, body) {
 
   const updates = pickUserUpdates(body, false, false);
   if (body.username !== undefined) {
-    const username = cleanString(body.username);
-    if (!/^[a-zA-Z0-9_.-]{3,32}$/.test(username)) {
-      throw new HttpError(400, '用户名需要 3-32 位，只能包含字母、数字、下划线、点或短横线。');
-    }
+    const username = validateUsername(body.username);
     const usernameLower = username.toLowerCase();
-    const existing = await findUserByUsername(collection, usernameLower);
-    if (existing && existing.id !== user.id) throw new HttpError(409, '这个用户名已经被占用。');
-    updates.username = username;
-    updates.usernameLower = usernameLower;
+    if (username !== (user.username || '')) {
+      const existing = await findUserByUsername(collection, usernameLower);
+      if (existing && existing.id !== user.id) throw new HttpError(409, '这个用户名已经被占用。');
+
+      const lastChangedAt = Date.parse(user.usernameUpdatedAt || '');
+      const elapsed = Number.isFinite(lastChangedAt) ? Date.now() - lastChangedAt : USERNAME_CHANGE_INTERVAL_MS;
+      if (elapsed < USERNAME_CHANGE_INTERVAL_MS) {
+        const days = Math.ceil((USERNAME_CHANGE_INTERVAL_MS - elapsed) / (24 * 60 * 60 * 1000));
+        throw new HttpError(429, `用户名 30 天内只能修改一次，还需 ${days} 天后可再次修改。`);
+      }
+
+      updates.username = username;
+      updates.usernameLower = usernameLower;
+      updates.usernameUpdatedAt = new Date().toISOString();
+    }
   }
   if (!Object.keys(updates).length) throw new HttpError(400, '没有可更新的字段。');
   updates.updatedAt = new Date().toISOString();
