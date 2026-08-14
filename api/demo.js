@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const COLLECTION_NAME = process.env.DEMO_USERS_COLLECTION || 'twikoo_demo_users';
 const CODE_COLLECTION_NAME = process.env.DEMO_CODES_COLLECTION || `${COLLECTION_NAME}_codes`;
 const NOTIFICATION_COLLECTION_NAME = process.env.DEMO_NOTIFICATIONS_COLLECTION || `${COLLECTION_NAME}_notifications`;
+const SHOP_COLLECTION_NAME = process.env.DEMO_SHOP_COLLECTION || `${COLLECTION_NAME}_shop`;
 const COMMENT_COLLECTION_NAME = process.env.TWIKOO_COMMENT_COLLECTION || process.env.COMMENT_COLLECTION_NAME || 'comment';
 const CONFIG_COLLECTION_NAME = process.env.TWIKOO_CONFIG_COLLECTION || process.env.CONFIG_COLLECTION_NAME || 'config';
 const CONFIG_COLLECTION_CANDIDATES = [...new Set([
@@ -22,13 +23,14 @@ const DEFAULT_ADMIN_BADGE_COLOR = '#ff5f63';
 const MAX_SOCIAL_LINKS = 5;
 const MAX_SOCIAL_LABEL_LENGTH = 24;
 const MAX_SOCIAL_URL_LENGTH = 300;
-const SHOP_REWARD_COST = 100;
-const SHOP_REWARD_ITEMS = {
-  quark: { label: '夸克网盘会员' },
-  bilibili: { label: 'B站大会员' },
-  tencent: { label: '腾讯视频会员' },
-  netease: { label: '网易云音乐会员' },
-};
+const DEFAULT_SHOP_ITEMS = [
+  { key: 'quark', name: '夸克网盘会员', price: 100, stock: 10, enabled: true },
+  { key: 'bilibili', name: 'B站大会员', price: 100, stock: 10, enabled: true },
+  { key: 'tencent', name: '腾讯视频会员', price: 100, stock: 10, enabled: true },
+  { key: 'netease', name: '网易云音乐会员', price: 100, stock: 10, enabled: true },
+];
+const SHOP_ITEM_TYPE = 'shopItem';
+const SHOP_REDEMPTION_STATUSES = new Set(['pending', 'processing', 'completed', 'cancelled']);
 const CODE_TTL_MS = 10 * 60 * 1000;
 const CODE_RESEND_MS = 60 * 1000;
 const CODE_MAX_ATTEMPTS = 5;
@@ -49,18 +51,21 @@ const memoryStore = global.__twikooUserDemoStore || {
   users: [],
   codes: [],
   notifications: [],
+  shopItems: [],
   seeded: false,
 };
 
 if (!Array.isArray(memoryStore.users)) memoryStore.users = [];
 if (!Array.isArray(memoryStore.codes)) memoryStore.codes = [];
 if (!Array.isArray(memoryStore.notifications)) memoryStore.notifications = [];
+if (!Array.isArray(memoryStore.shopItems)) memoryStore.shopItems = [];
 global.__twikooUserDemoStore = memoryStore;
 
 let mongoClientPromise;
 let mongoIndexesReady = false;
 let mongoCodeIndexesReady = false;
 let mongoNotificationIndexesReady = false;
+let mongoShopIndexesReady = false;
 let mongoConfigCache = null;
 let mongoConfigCacheAt = 0;
 const CONFIG_CACHE_MS = 30 * 1000;
@@ -259,7 +264,194 @@ function publicRedemptions(value) {
     cost: positiveInteger(item?.cost),
     status: cleanString(item?.status) || 'pending',
     createdAt: item?.createdAt || '',
+    updatedAt: item?.updatedAt || '',
   })).filter((item) => item.id && item.itemLabel);
+}
+
+function validatePhone(phone) {
+  const value = cleanString(phone).replace(/\s+/g, '');
+  if (!value) throw new HttpError(400, '请填写用于兑换的手机号。');
+  if (value.length < 6 || value.length > 24 || !/^[+\d-]+$/.test(value)) {
+    throw new HttpError(400, '手机号格式不正确，请重新填写。');
+  }
+  return value;
+}
+
+function normalizeShopKey(value) {
+  const key = cleanString(value).toLowerCase();
+  if (!/^[a-z0-9_-]{2,32}$/.test(key)) {
+    throw new HttpError(400, '商品标识需要 2-32 位，只能包含小写字母、数字、下划线或短横线。');
+  }
+  return key;
+}
+
+function normalizeShopItemInput(body = {}, fallback = {}) {
+  const key = normalizeShopKey(body.key || body.item || fallback.key);
+  const name = cleanString(body.name || body.label || body.itemLabel || fallback.name || fallback.label);
+  if (!name || name.length > 40) throw new HttpError(400, '商品名称需要 1-40 个字符。');
+  const price = positiveInteger(body.price ?? body.cost ?? fallback.price);
+  if (!price) throw new HttpError(400, '商品价格需要大于 0。');
+  const stock = positiveInteger(body.stock ?? fallback.stock);
+  return {
+    type: SHOP_ITEM_TYPE,
+    key,
+    name,
+    label: name,
+    price,
+    stock,
+    enabled: body.enabled === undefined ? fallback.enabled !== false : body.enabled !== false,
+  };
+}
+
+function publicShopItem(item) {
+  const normalized = normalizeShopItemInput(item, item);
+  return {
+    key: normalized.key,
+    name: normalized.name,
+    label: normalized.name,
+    price: normalized.price,
+    stock: normalized.stock,
+    enabled: normalized.enabled,
+    updatedAt: item?.updatedAt || item?.createdAt || '',
+  };
+}
+
+async function ensureShopCatalog(collection) {
+  if (collection) {
+    const now = new Date().toISOString();
+    await Promise.all(DEFAULT_SHOP_ITEMS.map((item) => collection.updateOne(
+      { type: SHOP_ITEM_TYPE, key: item.key },
+      { $setOnInsert: { ...normalizeShopItemInput(item, item), createdAt: now, updatedAt: now } },
+      { upsert: true }
+    )));
+    return;
+  }
+
+  if (!memoryStore.shopItems.length) {
+    const now = new Date().toISOString();
+    memoryStore.shopItems = DEFAULT_SHOP_ITEMS.map((item) => ({
+      ...normalizeShopItemInput(item, item),
+      createdAt: now,
+      updatedAt: now,
+    }));
+  }
+}
+
+async function listShopCatalog(collection, options = {}) {
+  await ensureShopCatalog(collection);
+  const includeDisabled = Boolean(options.includeDisabled);
+  const filter = includeDisabled ? { type: SHOP_ITEM_TYPE } : { type: SHOP_ITEM_TYPE, enabled: true };
+
+  if (collection) {
+    const items = await collection.find(filter, { projection: { _id: 0 } }).sort({ key: 1 }).toArray();
+    return items.map(publicShopItem);
+  }
+
+  return memoryStore.shopItems
+    .filter((item) => includeDisabled || item.enabled !== false)
+    .sort((a, b) => a.key.localeCompare(b.key))
+    .map(publicShopItem);
+}
+
+async function findShopItem(collection, key) {
+  const normalizedKey = normalizeShopKey(key);
+  const items = await listShopCatalog(collection, { includeDisabled: true });
+  const item = items.find((candidate) => candidate.key === normalizedKey);
+  if (!item || item.enabled === false) throw new HttpError(400, '请选择有效的兑换商品。');
+  return item;
+}
+
+async function updateShopItem(collection, body) {
+  const now = new Date().toISOString();
+  const item = { ...normalizeShopItemInput(body), updatedAt: now };
+
+  if (collection) {
+    await ensureShopCatalog(collection);
+    await collection.updateOne(
+      { type: SHOP_ITEM_TYPE, key: item.key },
+      { $set: item, $setOnInsert: { createdAt: now } },
+      { upsert: true }
+    );
+    return { item: publicShopItem(await collection.findOne({ type: SHOP_ITEM_TYPE, key: item.key })) };
+  }
+
+  await ensureShopCatalog(null);
+  const existingIndex = memoryStore.shopItems.findIndex((candidate) => candidate.key === item.key);
+  if (existingIndex >= 0) {
+    memoryStore.shopItems[existingIndex] = { ...memoryStore.shopItems[existingIndex], ...item };
+  } else {
+    memoryStore.shopItems.push({ ...item, createdAt: now });
+  }
+  return { item: publicShopItem(memoryStore.shopItems.find((candidate) => candidate.key === item.key)) };
+}
+
+function adminRedemptionItem(user, item) {
+  return {
+    id: cleanString(item?.id),
+    item: cleanString(item?.item),
+    itemLabel: cleanString(item?.itemLabel),
+    cost: positiveInteger(item?.cost),
+    phone: cleanString(item?.phone),
+    status: cleanString(item?.status) || 'pending',
+    note: cleanString(item?.note),
+    createdAt: item?.createdAt || '',
+    updatedAt: item?.updatedAt || '',
+    user: {
+      id: user.id,
+      uid: makeUid(user),
+      username: user.username,
+      displayName: user.displayName,
+      email: user.email,
+    },
+  };
+}
+
+async function listShopRedemptions(collection) {
+  const projection = { _id: 0, passwordHash: 0, salt: 0 };
+  const users = collection
+    ? await collection.find({ shopRedemptions: { $exists: true, $ne: [] } }, { projection }).toArray()
+    : memoryStore.users.filter((user) => Array.isArray(user.shopRedemptions) && user.shopRedemptions.length);
+
+  const redemptions = users.flatMap((user) => (user.shopRedemptions || [])
+    .map((item) => adminRedemptionItem(user, item))
+    .filter((item) => item.id && item.itemLabel));
+  redemptions.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  return { redemptions };
+}
+
+async function updateShopRedemption(collection, body) {
+  const id = cleanString(body.id);
+  const status = cleanString(body.status || 'pending');
+  const note = cleanString(body.note).slice(0, 200);
+  if (!id) throw new HttpError(400, '缺少兑换记录 ID。');
+  if (!SHOP_REDEMPTION_STATUSES.has(status)) throw new HttpError(400, '兑换状态不正确。');
+  const now = new Date().toISOString();
+
+  if (collection) {
+    const user = await collection.findOne({ 'shopRedemptions.id': id }, { projection: { passwordHash: 0, salt: 0 } });
+    if (!user) throw new HttpError(404, '兑换记录不存在。');
+    await collection.updateOne(
+      { id: user.id, 'shopRedemptions.id': id },
+      {
+        $set: {
+          'shopRedemptions.$.status': status,
+          'shopRedemptions.$.note': note,
+          'shopRedemptions.$.updatedAt': now,
+          updatedAt: now,
+        },
+      }
+    );
+    const updated = await collection.findOne({ id: user.id }, { projection: { passwordHash: 0, salt: 0 } });
+    const redemption = (updated.shopRedemptions || []).find((item) => item.id === id);
+    return { redemption: adminRedemptionItem(updated, redemption) };
+  }
+
+  const user = memoryStore.users.find((candidate) => (candidate.shopRedemptions || []).some((item) => item.id === id));
+  if (!user) throw new HttpError(404, '兑换记录不存在。');
+  const redemption = user.shopRedemptions.find((item) => item.id === id);
+  Object.assign(redemption, { status, note, updatedAt: now });
+  user.updatedAt = now;
+  return { redemption: adminRedemptionItem(user, redemption) };
 }
 
 function makeUsernameFromEmail(email) {
@@ -658,6 +850,23 @@ async function getNotificationCollection() {
   return collection;
 }
 
+async function getShopCollection() {
+  const db = await getMongoDatabase();
+  if (!db) return null;
+
+  const collection = db.collection(SHOP_COLLECTION_NAME);
+
+  if (!mongoShopIndexesReady) {
+    await Promise.all([
+      collection.createIndex({ type: 1, key: 1 }, { unique: true }),
+      collection.createIndex({ enabled: 1, stock: 1 }),
+    ]);
+    mongoShopIndexesReady = true;
+  }
+
+  return collection;
+}
+
 async function getCommentCollection() {
   const db = await getMongoDatabase();
   if (!db) return null;
@@ -695,9 +904,10 @@ async function countCommentsForUser(commentCollection, user) {
   return commentCollection.countDocuments({ $or: clauses });
 }
 
-async function refreshUserCommentStats(userCollection, commentCollection, user) {
+async function refreshUserCommentStats(userCollection, commentCollection, user, minimumExperience = 0) {
   if (!user) return user;
-  const stats = commentLevelStats(await countCommentsForUser(commentCollection, user));
+  const countedExperience = await countCommentsForUser(commentCollection, user);
+  const stats = commentLevelStats(Math.max(countedExperience, positiveInteger(minimumExperience)));
   const changed = Object.entries(stats).some(([key, value]) => user[key] !== value);
   const updatedUser = { ...user, ...stats };
 
@@ -1447,32 +1657,48 @@ async function updateProfile(collection, req, body) {
   return updateUser(collection, user.id, updates);
 }
 
-async function redeemReward(collection, req, body) {
+async function redeemReward(collection, shopCollection, req, body) {
   const user = await requireSessionUser(collection, req, body);
-  const rewardKey = cleanString(body.reward || body.item || body.type).toLowerCase();
-  const reward = SHOP_REWARD_ITEMS[rewardKey];
-  if (!reward) throw new HttpError(400, '请选择有效的兑换商品。');
+  const item = await findShopItem(shopCollection, body.reward || body.item || body.type || body.key);
+  const phone = validatePhone(body.phone);
+  if (item.stock <= 0) throw new HttpError(400, '这个商品已经兑完了。');
 
   const stats = userLevelStats(user);
-  if (stats.commentPoints < SHOP_REWARD_COST) {
+  if (stats.commentPoints < item.price) {
     throw new HttpError(400, `积分不足，当前可用 ${stats.commentPoints} 分。`);
   }
 
   const now = new Date().toISOString();
   const redemption = {
     id: crypto.randomUUID(),
-    item: rewardKey,
-    itemLabel: reward.label,
-    cost: SHOP_REWARD_COST,
+    item: item.key,
+    itemLabel: item.name || item.label,
+    cost: item.price,
+    phone,
     status: 'pending',
     createdAt: now,
+    updatedAt: now,
   };
+
+  if (shopCollection) {
+    const stockUpdate = await shopCollection.updateOne(
+      { type: SHOP_ITEM_TYPE, key: item.key, enabled: true, stock: { $gte: 1 } },
+      { $inc: { stock: -1 }, $set: { updatedAt: now } }
+    );
+    if (!stockUpdate.modifiedCount) throw new HttpError(400, '这个商品已经兑完了。');
+  } else {
+    await ensureShopCatalog(null);
+    const memoryItem = memoryStore.shopItems.find((candidate) => candidate.key === item.key);
+    if (!memoryItem || memoryItem.stock <= 0) throw new HttpError(400, '这个商品已经兑完了。');
+    memoryItem.stock -= 1;
+    memoryItem.updatedAt = now;
+  }
 
   if (collection) {
     await collection.updateOne(
       { id: user.id },
       {
-        $inc: { shopSpentPoints: SHOP_REWARD_COST },
+        $inc: { shopSpentPoints: item.price },
         $push: { shopRedemptions: { $each: [redemption], $slice: -20 } },
         $set: { updatedAt: now },
       }
@@ -1481,7 +1707,7 @@ async function redeemReward(collection, req, body) {
     return { user: toPublicUser(updated || user), redemption };
   }
 
-  user.shopSpentPoints = positiveInteger(user.shopSpentPoints) + SHOP_REWARD_COST;
+  user.shopSpentPoints = positiveInteger(user.shopSpentPoints) + item.price;
   user.shopRedemptions = [...publicRedemptions(user.shopRedemptions), redemption].slice(-20);
   user.updatedAt = now;
   return { user: toPublicUser(user), redemption };
@@ -1839,7 +2065,11 @@ function buildCommentAuthorUpdate(user) {
 }
 
 async function bindCommentAuthor(userCollection, commentCollection, user, body) {
-  if (!commentCollection) return { updated: false, reason: 'comment collection unavailable' };
+  const minimumExperienceForSubmission = positiveInteger(user.commentExperience || user.commentCount) + 1;
+  if (!commentCollection) {
+    const refreshedUser = await refreshUserCommentStats(userCollection, commentCollection, user, minimumExperienceForSubmission);
+    return { updated: false, reason: 'comment collection unavailable', user: toPublicUser(refreshedUser) };
+  }
 
   const comment = body.comment || {};
   const response = body.response || {};
@@ -1868,10 +2098,18 @@ async function bindCommentAuthor(userCollection, commentCollection, user, body) 
   const target = await commentCollection.findOne(query, {
     sort: { createdAt: -1, created: -1, insertedAt: -1, updatedAt: -1 },
   });
-  if (!target) return { updated: false, reason: 'comment not found' };
+  if (!target) {
+    const refreshedUser = await refreshUserCommentStats(userCollection, commentCollection, user, minimumExperienceForSubmission);
+    return { updated: false, reason: 'comment not found', user: toPublicUser(refreshedUser) };
+  }
+
+  const alreadyBound = target.userId === user.id ||
+    target.zeoraUserId === user.id ||
+    target._zeoraCommentAuth?.userId === user.id;
+  const minimumExperience = alreadyBound ? 0 : minimumExperienceForSubmission;
 
   await commentCollection.updateOne({ _id: target._id }, { $set: buildCommentAuthorUpdate(user) });
-  const refreshedUser = await refreshUserCommentStats(userCollection, commentCollection, user);
+  const refreshedUser = await refreshUserCommentStats(userCollection, commentCollection, user, minimumExperience);
   const update = buildCommentAuthorUpdate(refreshedUser);
   await commentCollection.updateOne({ _id: target._id }, { $set: update });
   return {
@@ -1896,6 +2134,7 @@ async function handle(req, res) {
   const collection = await getMongoCollection();
   const codeCollection = await getCodeCollection();
   const notificationCollection = await getNotificationCollection();
+  const shopCollection = await getShopCollection();
   const commentCollection = await getCommentCollection().catch(() => null);
   const storageMode = collection ? 'mongodb' : 'memory';
   const runtimeConfig = await readTwikooRuntimeConfig();
@@ -1931,6 +2170,11 @@ async function handle(req, res) {
     return;
   }
 
+  if (action === 'shopCatalog' && (req.method === 'GET' || req.method === 'POST')) {
+    send(res, 200, { ok: true, items: await listShopCatalog(shopCollection) });
+    return;
+  }
+
   if (action === 'requestCode' && req.method === 'POST') {
     await verifyCaptchaIfNeeded(runtimeConfig, body);
     send(res, 200, { ok: true, code: await requestLoginCode(codeCollection, body) });
@@ -1943,6 +2187,7 @@ async function handle(req, res) {
   }
 
   if (action === 'registerWithCode' && req.method === 'POST') {
+    await verifyCaptchaIfNeeded(runtimeConfig, body);
     send(res, 201, { ok: true, ...(await registerUserWithCode(collection, codeCollection, body)) });
     return;
   }
@@ -1982,6 +2227,30 @@ async function handle(req, res) {
     return;
   }
 
+  if (action === 'adminShopCatalog' && (req.method === 'GET' || req.method === 'POST')) {
+    await authorizeAdmin(collection, req, body, url);
+    send(res, 200, { ok: true, items: await listShopCatalog(shopCollection, { includeDisabled: true }) });
+    return;
+  }
+
+  if (action === 'updateShopItem' && req.method === 'POST') {
+    await authorizeAdmin(collection, req, body, url);
+    send(res, 200, { ok: true, ...(await updateShopItem(shopCollection, body)) });
+    return;
+  }
+
+  if (action === 'listRedemptions' && (req.method === 'GET' || req.method === 'POST')) {
+    await authorizeAdmin(collection, req, body, url);
+    send(res, 200, { ok: true, ...(await listShopRedemptions(collection)) });
+    return;
+  }
+
+  if (action === 'updateRedemption' && req.method === 'POST') {
+    await authorizeAdmin(collection, req, body, url);
+    send(res, 200, { ok: true, ...(await updateShopRedemption(collection, body)) });
+    return;
+  }
+
   if (action === 'register' && req.method === 'POST') {
     await verifyCaptchaIfNeeded(runtimeConfig, body);
     const user = await registerUser(collection, body);
@@ -2006,7 +2275,7 @@ async function handle(req, res) {
   }
 
   if (action === 'redeemReward' && req.method === 'POST') {
-    send(res, 200, { ok: true, ...(await redeemReward(collection, req, body)) });
+    send(res, 200, { ok: true, ...(await redeemReward(collection, shopCollection, req, body)) });
     return;
   }
 
