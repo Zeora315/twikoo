@@ -4,6 +4,7 @@ const COLLECTION_NAME = process.env.DEMO_USERS_COLLECTION || 'twikoo_demo_users'
 const CODE_COLLECTION_NAME = process.env.DEMO_CODES_COLLECTION || `${COLLECTION_NAME}_codes`;
 const NOTIFICATION_COLLECTION_NAME = process.env.DEMO_NOTIFICATIONS_COLLECTION || `${COLLECTION_NAME}_notifications`;
 const SHOP_COLLECTION_NAME = process.env.DEMO_SHOP_COLLECTION || `${COLLECTION_NAME}_shop`;
+const AI_CONFIG_COLLECTION_NAME = process.env.DEMO_AI_CONFIG_COLLECTION || `${COLLECTION_NAME}_ai_config`;
 const COMMENT_COLLECTION_NAME = process.env.TWIKOO_COMMENT_COLLECTION || process.env.COMMENT_COLLECTION_NAME || 'comment';
 const CONFIG_COLLECTION_NAME = process.env.TWIKOO_CONFIG_COLLECTION || process.env.CONFIG_COLLECTION_NAME || 'config';
 const CONFIG_COLLECTION_CANDIDATES = [...new Set([
@@ -23,17 +24,34 @@ const DEFAULT_ADMIN_BADGE_COLOR = '#ff5f63';
 const MAX_SOCIAL_LINKS = 5;
 const MAX_SOCIAL_LABEL_LENGTH = 24;
 const MAX_SOCIAL_URL_LENGTH = 300;
+const MAX_SHOP_IMAGE_LENGTH = 300;
+const MAX_SHOP_DESCRIPTION_LENGTH = 120;
+const MAX_AI_SYSTEM_PROMPT_LENGTH = 1200;
+const MAX_AI_COMMENT_CONTEXT_LENGTH = 12000;
+const MAX_AI_DRAFT_LENGTH = 1000;
 const USERNAME_CHANGE_INTERVAL_MS = 30 * 24 * 60 * 60 * 1000;
 const USERNAME_PATTERN = /^[a-zA-Z0-9_.-]{3,32}$/;
 const UID_PATTERN = /^[a-zA-Z0-9_-]{2,32}$/;
 const DEFAULT_SHOP_ITEMS = [
-  { key: 'quark', name: '夸克网盘会员', price: 100, stock: 10, enabled: true },
-  { key: 'bilibili', name: 'B站大会员', price: 100, stock: 10, enabled: true },
-  { key: 'tencent', name: '腾讯视频会员', price: 100, stock: 10, enabled: true },
-  { key: 'netease', name: '网易云音乐会员', price: 100, stock: 10, enabled: true },
+  { key: 'quark', name: '夸克网盘会员', description: '兑换后按填写手机号发放会员权益。', price: 100, stock: 10, enabled: true },
+  { key: 'bilibili', name: 'B站大会员', description: '兑换后按填写手机号发放会员权益。', price: 100, stock: 10, enabled: true },
+  { key: 'tencent', name: '腾讯视频会员', description: '兑换后按填写手机号发放会员权益。', price: 100, stock: 10, enabled: true },
+  { key: 'netease', name: '网易云音乐会员', description: '兑换后按填写手机号发放会员权益。', price: 100, stock: 10, enabled: true },
 ];
 const SHOP_ITEM_TYPE = 'shopItem';
+const AI_CONFIG_DOC_ID = 'ai-comment';
 const SHOP_REDEMPTION_STATUSES = new Set(['pending', 'processing', 'completed', 'cancelled']);
+const DEFAULT_AI_CONFIG = {
+  id: AI_CONFIG_DOC_ID,
+  enabled: true,
+  requireLogin: true,
+  provider: 'DeepSeek',
+  apiBaseUrl: 'https://api.deepseek.com/chat/completions',
+  model: 'deepseek-mimo',
+  temperature: 0.72,
+  maxTokens: 220,
+  systemPrompt: '你是 ZeoraʼBlog 的评论助手。请写自然、克制、有具体观点的中文评论，不要标题党，不要像广告，不要输出 Markdown。',
+};
 const CODE_TTL_MS = 10 * 60 * 1000;
 const CODE_RESEND_MS = 60 * 1000;
 const CODE_MAX_ATTEMPTS = 5;
@@ -55,6 +73,7 @@ const memoryStore = global.__twikooUserDemoStore || {
   codes: [],
   notifications: [],
   shopItems: [],
+  aiConfig: null,
   seeded: false,
 };
 
@@ -62,6 +81,7 @@ if (!Array.isArray(memoryStore.users)) memoryStore.users = [];
 if (!Array.isArray(memoryStore.codes)) memoryStore.codes = [];
 if (!Array.isArray(memoryStore.notifications)) memoryStore.notifications = [];
 if (!Array.isArray(memoryStore.shopItems)) memoryStore.shopItems = [];
+if (!memoryStore.aiConfig || typeof memoryStore.aiConfig !== 'object') memoryStore.aiConfig = null;
 global.__twikooUserDemoStore = memoryStore;
 
 let mongoClientPromise;
@@ -69,6 +89,7 @@ let mongoIndexesReady = false;
 let mongoCodeIndexesReady = false;
 let mongoNotificationIndexesReady = false;
 let mongoShopIndexesReady = false;
+let mongoAiConfigIndexesReady = false;
 let mongoConfigCache = null;
 let mongoConfigCacheAt = 0;
 const CONFIG_CACHE_MS = 30 * 1000;
@@ -186,6 +207,40 @@ function validateWebsiteUrl(websiteUrl) {
     return url.toString().replace(/\/$/, '');
   } catch (error) {
     throw new HttpError(400, '个人网站链接格式不正确。');
+  }
+}
+
+function validateShopImageUrl(imageUrl) {
+  const raw = cleanString(imageUrl);
+  if (!raw) return '';
+  if (raw.startsWith('/') && !raw.startsWith('//')) {
+    if (raw.length > MAX_SHOP_IMAGE_LENGTH || /[\s<>"']/.test(raw)) {
+      throw new HttpError(400, '商品预览图站内路径格式不正确。');
+    }
+    return raw;
+  }
+  const value = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  if (value.length > MAX_SHOP_IMAGE_LENGTH) throw new HttpError(400, '商品预览图链接不能超过 300 个字符。');
+  try {
+    const url = new URL(value);
+    if (!['http:', 'https:'].includes(url.protocol)) throw new Error('invalid protocol');
+    return url.toString().replace(/\/$/, '');
+  } catch (error) {
+    throw new HttpError(400, '商品预览图只能填写站内路径或 http(s) 图片链接。');
+  }
+}
+
+function validateAiEndpointUrl(apiBaseUrl) {
+  const raw = cleanString(apiBaseUrl);
+  if (!raw) return DEFAULT_AI_CONFIG.apiBaseUrl;
+  const value = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  if (value.length > 300) throw new HttpError(400, 'AI 接口地址不能超过 300 个字符。');
+  try {
+    const url = new URL(value);
+    if (!['http:', 'https:'].includes(url.protocol)) throw new Error('invalid protocol');
+    return url.toString();
+  } catch (error) {
+    throw new HttpError(400, 'AI 接口地址格式不正确。');
   }
 }
 
@@ -308,16 +363,21 @@ function normalizeShopItemInput(body = {}, fallback = {}) {
   const key = normalizeShopKey(body.key || body.item || fallback.key);
   const name = cleanString(body.name || body.label || body.itemLabel || fallback.name || fallback.label);
   if (!name || name.length > 40) throw new HttpError(400, '商品名称需要 1-40 个字符。');
+  const description = cleanString(body.description || body.content || fallback.description || fallback.content);
+  if (description.length > MAX_SHOP_DESCRIPTION_LENGTH) throw new HttpError(400, '商品说明不能超过 120 个字符。');
   const price = positiveInteger(body.price ?? body.cost ?? fallback.price);
   if (!price) throw new HttpError(400, '商品价格需要大于 0。');
   const stock = positiveInteger(body.stock ?? fallback.stock);
+  const imageUrl = validateShopImageUrl(body.imageUrl ?? body.coverUrl ?? body.previewUrl ?? fallback.imageUrl ?? fallback.coverUrl ?? fallback.previewUrl);
   return {
     type: SHOP_ITEM_TYPE,
     key,
     name,
     label: name,
+    description,
     price,
     stock,
+    imageUrl,
     enabled: body.enabled === undefined ? fallback.enabled !== false : body.enabled !== false,
   };
 }
@@ -328,8 +388,10 @@ function publicShopItem(item) {
     key: normalized.key,
     name: normalized.name,
     label: normalized.name,
+    description: normalized.description,
     price: normalized.price,
     stock: normalized.stock,
+    imageUrl: normalized.imageUrl,
     enabled: normalized.enabled,
     updatedAt: item?.updatedAt || item?.createdAt || '',
   };
@@ -402,6 +464,223 @@ async function updateShopItem(collection, body) {
     memoryStore.shopItems.push({ ...item, createdAt: now });
   }
   return { item: publicShopItem(memoryStore.shopItems.find((candidate) => candidate.key === item.key)) };
+}
+
+function booleanValue(value, fallback = false) {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value === 'boolean') return value;
+  const normalized = cleanString(value).toLowerCase();
+  if (['1', 'true', 'yes', 'on', 'enabled'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off', 'disabled'].includes(normalized)) return false;
+  return fallback;
+}
+
+function decimalValue(value, fallback, min, max) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, number));
+}
+
+function aiRuntimeConfig(runtimeConfig = {}) {
+  return {
+    enabled: booleanValue(runtimeValue(runtimeConfig, ['AI_COMMENT_ENABLED', 'aiCommentEnabled']), DEFAULT_AI_CONFIG.enabled),
+    requireLogin: booleanValue(runtimeValue(runtimeConfig, ['AI_COMMENT_REQUIRE_LOGIN', 'aiCommentRequireLogin']), DEFAULT_AI_CONFIG.requireLogin),
+    provider: runtimeValue(runtimeConfig, ['AI_COMMENT_PROVIDER', 'aiCommentProvider', 'DEEPSEEK_PROVIDER', 'deepseekProvider']) || DEFAULT_AI_CONFIG.provider,
+    apiBaseUrl: runtimeValue(runtimeConfig, [
+      'AI_COMMENT_API_BASE_URL', 'aiCommentApiBaseUrl', 'AI_COMMENT_ENDPOINT', 'aiCommentEndpoint',
+      'DEEPSEEK_API_BASE_URL', 'deepseekApiBaseUrl', 'DEEPSEEK_ENDPOINT', 'deepseekEndpoint',
+    ]) || DEFAULT_AI_CONFIG.apiBaseUrl,
+    model: runtimeValue(runtimeConfig, ['AI_COMMENT_MODEL', 'aiCommentModel', 'DEEPSEEK_MODEL', 'deepseekModel']) || DEFAULT_AI_CONFIG.model,
+    apiKey: runtimeValue(runtimeConfig, [
+      'AI_COMMENT_API_KEY', 'aiCommentApiKey', 'DEEPSEEK_API_KEY', 'deepseekApiKey',
+      'OPENAI_API_KEY', 'openaiApiKey',
+    ]),
+    temperature: runtimeValue(runtimeConfig, ['AI_COMMENT_TEMPERATURE', 'aiCommentTemperature']) || DEFAULT_AI_CONFIG.temperature,
+    maxTokens: runtimeValue(runtimeConfig, ['AI_COMMENT_MAX_TOKENS', 'aiCommentMaxTokens']) || DEFAULT_AI_CONFIG.maxTokens,
+    systemPrompt: runtimeValue(runtimeConfig, ['AI_COMMENT_SYSTEM_PROMPT', 'aiCommentSystemPrompt']) || DEFAULT_AI_CONFIG.systemPrompt,
+  };
+}
+
+function normalizeAiConfigInput(body = {}, fallback = {}) {
+  const source = { ...DEFAULT_AI_CONFIG, ...fallback };
+  const systemPrompt = cleanString(body.systemPrompt ?? source.systemPrompt).slice(0, MAX_AI_SYSTEM_PROMPT_LENGTH);
+  const model = cleanString(body.model ?? source.model) || DEFAULT_AI_CONFIG.model;
+  if (model.length > 80) throw new HttpError(400, 'AI 模型名称不能超过 80 个字符。');
+  const provider = cleanString(body.provider ?? source.provider) || DEFAULT_AI_CONFIG.provider;
+  if (provider.length > 40) throw new HttpError(400, 'AI 服务名称不能超过 40 个字符。');
+
+  let apiKey = cleanString(source.apiKey);
+  const incomingKey = cleanString(body.apiKey);
+  if (booleanValue(body.clearApiKey, false)) {
+    apiKey = '';
+  } else if (incomingKey && !/^•+$/.test(incomingKey)) {
+    if (incomingKey.length > 300) throw new HttpError(400, 'AI API Key 不能超过 300 个字符。');
+    apiKey = incomingKey;
+  }
+
+  return {
+    id: AI_CONFIG_DOC_ID,
+    enabled: booleanValue(body.enabled, source.enabled),
+    requireLogin: booleanValue(body.requireLogin, source.requireLogin),
+    provider,
+    apiBaseUrl: validateAiEndpointUrl(body.apiBaseUrl ?? source.apiBaseUrl),
+    model,
+    apiKey,
+    temperature: decimalValue(body.temperature ?? source.temperature, DEFAULT_AI_CONFIG.temperature, 0, 2),
+    maxTokens: Math.min(1000, Math.max(60, positiveInteger(body.maxTokens ?? source.maxTokens) || DEFAULT_AI_CONFIG.maxTokens)),
+    systemPrompt: systemPrompt || DEFAULT_AI_CONFIG.systemPrompt,
+  };
+}
+
+function maskSecret(value) {
+  const secret = cleanString(value);
+  if (!secret) return '';
+  if (secret.length <= 8) return '••••••';
+  return `${secret.slice(0, 3)}••••${secret.slice(-4)}`;
+}
+
+function publicAiConfig(config) {
+  return {
+    enabled: Boolean(config.enabled),
+    requireLogin: config.requireLogin !== false,
+    provider: config.provider,
+    apiBaseUrl: config.apiBaseUrl,
+    model: config.model,
+    temperature: config.temperature,
+    maxTokens: config.maxTokens,
+    systemPrompt: config.systemPrompt,
+    hasApiKey: Boolean(cleanString(config.apiKey)),
+    apiKeyMasked: maskSecret(config.apiKey),
+    updatedAt: config.updatedAt || '',
+  };
+}
+
+async function getStoredAiConfig(collection) {
+  if (collection) {
+    return collection.findOne({ id: AI_CONFIG_DOC_ID }, { projection: { _id: 0 } });
+  }
+  seedMemoryStore();
+  return memoryStore.aiConfig;
+}
+
+async function getEffectiveAiConfig(collection, runtimeConfig) {
+  const runtime = normalizeAiConfigInput(aiRuntimeConfig(runtimeConfig), DEFAULT_AI_CONFIG);
+  const stored = await getStoredAiConfig(collection);
+  return normalizeAiConfigInput(stored || {}, runtime);
+}
+
+async function updateAiConfig(collection, body, runtimeConfig) {
+  const stored = await getStoredAiConfig(collection);
+  const runtime = normalizeAiConfigInput(aiRuntimeConfig(runtimeConfig), DEFAULT_AI_CONFIG);
+  const currentStored = stored ? normalizeAiConfigInput(stored, { ...runtime, apiKey: stored.apiKey || '' }) : { ...runtime, apiKey: '' };
+  const now = new Date().toISOString();
+  const config = { ...normalizeAiConfigInput(body, currentStored), updatedAt: now };
+
+  if (collection) {
+    await collection.updateOne(
+      { id: AI_CONFIG_DOC_ID },
+      { $set: config, $setOnInsert: { createdAt: now } },
+      { upsert: true }
+    );
+  } else {
+    memoryStore.aiConfig = { ...config, createdAt: memoryStore.aiConfig?.createdAt || now };
+  }
+
+  return { aiConfig: publicAiConfig(await getEffectiveAiConfig(collection, runtimeConfig)) };
+}
+
+function aiMode(value) {
+  return cleanString(value).toLowerCase() === 'polish' ? 'polish' : 'generate';
+}
+
+function stripAiMarker(value) {
+  return cleanString(value).replace(/[\u2062\u2063\u200B\u200C]/g, '');
+}
+
+function aiUserPrompt(body, user) {
+  const mode = aiMode(body.mode);
+  const title = cleanString(body.title).slice(0, 160) || '未命名文章';
+  const content = cleanString(body.content).replace(/\s+/g, ' ').slice(0, MAX_AI_COMMENT_CONTEXT_LENGTH);
+  const draft = stripAiMarker(body.draft).slice(0, MAX_AI_DRAFT_LENGTH);
+  const name = cleanString(user?.displayName || user?.username || '读者');
+
+  if (mode === 'polish') {
+    if (!draft) throw new HttpError(400, '请先写一点内容，再使用 AI 润色。');
+    return [
+      `读者：${name}`,
+      `文章标题：${title}`,
+      `原评论：${draft}`,
+      '请润色这条评论：保留原意，语气自然，长度不要明显增加。只输出润色后的评论正文。',
+    ].join('\n');
+  }
+
+  if (!content) throw new HttpError(400, '没有读取到文章内容，暂时无法生成评论。');
+  return [
+    `读者：${name}`,
+    `文章标题：${title}`,
+    `文章内容摘录：${content}`,
+    draft ? `读者已有想法：${draft}` : '',
+    '请生成一条适合博客评论区的中文评论，60-140 字，具体、有礼貌、有观点。只输出评论正文。',
+  ].filter(Boolean).join('\n');
+}
+
+function extractAiText(payload) {
+  const text = payload?.choices?.[0]?.message?.content ||
+    payload?.choices?.[0]?.text ||
+    payload?.output_text ||
+    payload?.comment ||
+    payload?.text ||
+    '';
+  return cleanString(text)
+    .replace(/^```(?:\w+)?/i, '')
+    .replace(/```$/i, '')
+    .replace(/^["“]|["”]$/g, '')
+    .trim();
+}
+
+async function requestAiComment(config, body, user) {
+  if (!config.enabled) throw new HttpError(403, 'AI 评论功能已关闭。');
+  if (!config.apiKey) throw new HttpError(500, 'AI 评论 API Key 未配置，请到用户中心管理页配置。');
+
+  const mode = aiMode(body.mode);
+  const messages = [
+    { role: 'system', content: config.systemPrompt || DEFAULT_AI_CONFIG.systemPrompt },
+    { role: 'user', content: aiUserPrompt(body, user) },
+  ];
+
+  let response;
+  try {
+    response = await fetch(config.apiBaseUrl, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${config.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: cleanString(body.model) || config.model,
+        messages,
+        temperature: config.temperature,
+        max_tokens: config.maxTokens,
+      }),
+    });
+  } catch (error) {
+    throw new HttpError(502, 'AI 评论接口连接失败，请检查接口地址或网络。');
+  }
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const detail = cleanString(payload.error?.message || payload.message || payload.error);
+    throw new HttpError(response.status >= 500 ? 502 : 400, detail || `AI 评论接口返回 HTTP ${response.status}`);
+  }
+
+  const comment = extractAiText(payload);
+  if (!comment) throw new HttpError(502, 'AI 评论接口没有返回可用内容。');
+  return {
+    comment: comment.slice(0, 500),
+    mode,
+    model: cleanString(body.model) || config.model,
+    aiAssisted: true,
+  };
 }
 
 function adminRedemptionItem(user, item) {
@@ -879,6 +1158,20 @@ async function getShopCollection() {
       collection.createIndex({ enabled: 1, stock: 1 }),
     ]);
     mongoShopIndexesReady = true;
+  }
+
+  return collection;
+}
+
+async function getAiConfigCollection() {
+  const db = await getMongoDatabase();
+  if (!db) return null;
+
+  const collection = db.collection(AI_CONFIG_COLLECTION_NAME);
+
+  if (!mongoAiConfigIndexesReady) {
+    await collection.createIndex({ id: 1 }, { unique: true });
+    mongoAiConfigIndexesReady = true;
   }
 
   return collection;
@@ -1365,10 +1658,46 @@ function verificationPurposeMeta(purpose) {
   if (value === 'register') {
     return { purpose: 'register', label: '注册验证码', intro: '完成评论账号注册' };
   }
+  if (value === 'changeemail' || value === 'change_email') {
+    return { purpose: 'changeEmail', label: '修改邮箱验证码', intro: '修改你的评论账号邮箱' };
+  }
   if (value === 'reset') {
     return { purpose: 'reset', label: '重置密码验证码', intro: '重置你的评论账号密码' };
   }
   return { purpose: 'login', label: '登录验证码', intro: '登录评论账号' };
+}
+
+async function sendAccountNoticeMail(email, subject, body) {
+  let nodemailer;
+  try {
+    nodemailer = require('nodemailer');
+  } catch (error) {
+    console.warn('[demo-users] nodemailer is not available for account notice mail.');
+    return false;
+  }
+
+  try {
+    const runtimeConfig = await readTwikooRuntimeConfig();
+    const site = siteMeta(runtimeConfig);
+    const transporter = nodemailer.createTransport(mailConfig(runtimeConfig));
+    const text = `${body}\n\n${site.url}`;
+    await transporter.sendMail({
+      from: `"${site.senderName}" <${site.senderEmail}>`,
+      to: email,
+      subject: `${site.name} ${subject}`,
+      text,
+      html: `
+        <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;line-height:1.7;color:#202124">
+          <p>${body}</p>
+          <p><a href="${site.url}" target="_blank" rel="noopener noreferrer" style="color:#202124;text-decoration:none">${site.url}</a></p>
+        </div>
+      `,
+    });
+    return true;
+  } catch (error) {
+    console.warn('[demo-users] failed to send account notice mail:', error.message || error);
+    return false;
+  }
 }
 
 async function sendVerificationMail(email, code, purpose = 'login') {
@@ -1639,10 +1968,11 @@ async function updateUser(collection, id, updates) {
     const result = await collection.findOneAndUpdate(
       { id },
       { $set: updates },
-      { returnDocument: 'after', projection: { _id: 0, passwordHash: 0, salt: 0 } }
+      { returnDocument: 'after', includeResultMetadata: false, projection: { _id: 0, passwordHash: 0, salt: 0 } }
     );
-    if (!result) throw new HttpError(404, '用户不存在。');
-    return toPublicUser(result);
+    const updatedUser = result?.value || result;
+    if (!updatedUser) throw new HttpError(404, '用户不存在。');
+    return toPublicUser(updatedUser);
   }
 
   seedMemoryStore();
@@ -1769,7 +2099,58 @@ async function changePassword(collection, req, body) {
     Object.assign(user, updates);
   }
 
+  await sendAccountNoticeMail(
+    normalizeEmail(user.email),
+    '密码已修改',
+    '你的评论账号密码刚刚被修改。如果这不是你本人操作，请尽快通过忘记密码重置。'
+  );
+
   return toPublicUser({ ...user, ...updates });
+}
+
+async function changeEmail(collection, codeCollection, req, body) {
+  const user = await requireSessionUser(collection, req, body);
+  const emailLower = validateEmail(body.email || body.newEmail);
+  if (emailLower === normalizeEmail(user.email)) throw new HttpError(400, '新邮箱不能和当前邮箱相同。');
+
+  const existing = await findUserByEmail(collection, emailLower);
+  if (existing && existing.id !== user.id) throw new HttpError(409, '这个邮箱已经注册，请换一个邮箱。');
+  await consumeVerificationCode(codeCollection, { ...body, email: emailLower }, 'changeEmail');
+
+  const oldEmail = normalizeEmail(user.email);
+  const updates = {
+    email: emailLower,
+    emailLower,
+    updatedAt: new Date().toISOString(),
+  };
+
+  if (collection) {
+    await collection.updateOne({ id: user.id }, { $set: updates });
+  } else {
+    Object.assign(user, updates);
+  }
+
+  const updated = { ...user, ...updates };
+  await sendAccountNoticeMail(oldEmail, '邮箱已修改', `你的评论账号邮箱刚刚修改为 ${emailLower}。`);
+  await sendAccountNoticeMail(emailLower, '邮箱已绑定', '这个邮箱刚刚绑定到你的评论账号。');
+
+  return {
+    user: toPublicUser(updated),
+    sessionToken: signSession(updated),
+  };
+}
+
+async function deleteAccount(collection, req, body) {
+  const user = await requireSessionUser(collection, req, body);
+  if (cleanString(body.confirm) !== 'DELETE') throw new HttpError(400, '请确认注销账号。');
+
+  await sendAccountNoticeMail(
+    normalizeEmail(user.email),
+    '账号已注销',
+    '你的评论账号刚刚被注销，账号积分和兑换资格已经全部作废。'
+  );
+
+  return deleteUser(collection, user.id);
 }
 
 async function deleteUser(collection, id) {
@@ -2166,6 +2547,7 @@ async function handle(req, res) {
   const codeCollection = await getCodeCollection();
   const notificationCollection = await getNotificationCollection();
   const shopCollection = await getShopCollection();
+  const aiConfigCollection = await getAiConfigCollection();
   const commentCollection = await getCommentCollection().catch(() => null);
   const storageMode = collection ? 'mongodb' : 'memory';
   const runtimeConfig = await readTwikooRuntimeConfig();
@@ -2203,6 +2585,13 @@ async function handle(req, res) {
 
   if (action === 'shopCatalog' && (req.method === 'GET' || req.method === 'POST')) {
     send(res, 200, { ok: true, items: await listShopCatalog(shopCollection) });
+    return;
+  }
+
+  if (action === 'aiComment' && req.method === 'POST') {
+    const aiConfig = await getEffectiveAiConfig(aiConfigCollection, runtimeConfig);
+    const user = aiConfig.requireLogin ? await requireSessionUser(collection, req, body) : null;
+    send(res, 200, { ok: true, ...(await requestAiComment(aiConfig, body, user)) });
     return;
   }
 
@@ -2258,6 +2647,16 @@ async function handle(req, res) {
     return;
   }
 
+  if (action === 'aiConfig' && (req.method === 'GET' || req.method === 'POST')) {
+    await authorizeAdmin(collection, req, body, url);
+    if (req.method === 'POST' && Object.keys(body).some((key) => key !== 'sessionToken')) {
+      send(res, 200, { ok: true, ...(await updateAiConfig(aiConfigCollection, body, runtimeConfig)) });
+      return;
+    }
+    send(res, 200, { ok: true, aiConfig: publicAiConfig(await getEffectiveAiConfig(aiConfigCollection, runtimeConfig)) });
+    return;
+  }
+
   if (action === 'adminShopCatalog' && (req.method === 'GET' || req.method === 'POST')) {
     await authorizeAdmin(collection, req, body, url);
     send(res, 200, { ok: true, items: await listShopCatalog(shopCollection, { includeDisabled: true }) });
@@ -2302,6 +2701,16 @@ async function handle(req, res) {
 
   if (action === 'changePassword' && req.method === 'POST') {
     send(res, 200, { ok: true, user: await changePassword(collection, req, body) });
+    return;
+  }
+
+  if (action === 'changeEmail' && req.method === 'POST') {
+    send(res, 200, { ok: true, ...(await changeEmail(collection, codeCollection, req, body)) });
+    return;
+  }
+
+  if (action === 'deleteAccount' && req.method === 'POST') {
+    send(res, 200, { ok: true, deleted: await deleteAccount(collection, req, body) });
     return;
   }
 
