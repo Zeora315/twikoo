@@ -43,6 +43,7 @@ const AI_CONFIG_DOC_ID = 'ai-comment';
 const SHOP_REDEMPTION_STATUSES = new Set(['pending', 'processing', 'completed', 'cancelled']);
 const DEFAULT_AI_CONFIG = {
   id: AI_CONFIG_DOC_ID,
+  name: 'DeepSeek',
   enabled: true,
   requireLogin: true,
   provider: 'DeepSeek',
@@ -52,7 +53,7 @@ const DEFAULT_AI_CONFIG = {
   maxTokens: 220,
   systemPrompt: '你是 ZeoraʼBlog 的评论助手。请写自然、克制、有具体观点的中文评论，不要标题党，不要像广告，不要输出 Markdown。',
 };
-const CODE_TTL_MS = 10 * 60 * 1000;
+const CODE_TTL_MS = 15 * 60 * 1000;
 const CODE_RESEND_MS = 60 * 1000;
 const CODE_MAX_ATTEMPTS = 5;
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -74,6 +75,7 @@ const memoryStore = global.__twikooUserDemoStore || {
   notifications: [],
   shopItems: [],
   aiConfig: null,
+  aiConfigs: [],
   seeded: false,
 };
 
@@ -302,19 +304,29 @@ function validateBadgeColor(color) {
   throw new HttpError(400, '身份标签颜色只能使用 #RRGGBB 格式。');
 }
 
+// 支持的四类社交平台；platform 缺省时也可使用自定义名称（向后兼容）
+const SOCIAL_PLATFORMS = {
+  github: 'GitHub',
+  bilibili: '哔哩哔哩',
+  douyin: '抖音',
+  twitter: '推特',
+};
+
 function normalizeSocialLinks(value) {
   if (value === undefined || value === null || value === '') return [];
   if (!Array.isArray(value)) throw new HttpError(400, '社交链接需要以数组提交。');
   if (value.length > MAX_SOCIAL_LINKS) throw new HttpError(400, `社交链接最多只能设置 ${MAX_SOCIAL_LINKS} 个。`);
 
   return value.map((item) => {
-    const label = cleanString(item?.label || item?.name || item?.title);
+    const platform = cleanString(item?.platform || item?.id || item?.key).toLowerCase();
+    const platformLabel = SOCIAL_PLATFORMS[platform] || '';
+    const label = cleanString(item?.label || item?.name || item?.title) || platformLabel;
     const rawUrl = cleanString(item?.url || item?.href || item?.link);
     if (!label && !rawUrl) return null;
     if (!label || label.length > MAX_SOCIAL_LABEL_LENGTH) throw new HttpError(400, `社交名称需要 1-${MAX_SOCIAL_LABEL_LENGTH} 个字符。`);
     if (!rawUrl || rawUrl.length > MAX_SOCIAL_URL_LENGTH) throw new HttpError(400, `社交链接需要 1-${MAX_SOCIAL_URL_LENGTH} 个字符。`);
     const url = validateWebsiteUrl(rawUrl);
-    return { label, url };
+    return { platform: platform || '', label, url };
   }).filter(Boolean);
 }
 
@@ -322,7 +334,8 @@ function publicSocialLinks(value) {
   if (!Array.isArray(value)) return [];
   return value
     .map((item) => ({
-      label: cleanString(item?.label || item?.name || item?.title).slice(0, MAX_SOCIAL_LABEL_LENGTH),
+      platform: cleanString(item?.platform || item?.id || item?.key).toLowerCase(),
+      label: cleanString(item?.label || item?.name || item?.title || SOCIAL_PLATFORMS[cleanString(item?.platform || item?.id || item?.key).toLowerCase()]).slice(0, MAX_SOCIAL_LABEL_LENGTH),
       url: cleanString(item?.url || item?.href || item?.link).slice(0, MAX_SOCIAL_URL_LENGTH),
     }))
     .filter((item) => item.label && /^https?:\/\//i.test(item.url))
@@ -518,8 +531,11 @@ function normalizeAiConfigInput(body = {}, fallback = {}) {
     apiKey = incomingKey;
   }
 
+  const name = cleanString(body.name ?? source.name).slice(0, 40) || source.name || DEFAULT_AI_CONFIG.name;
+
   return {
-    id: AI_CONFIG_DOC_ID,
+    id: cleanString(body.id) || cleanString(source.id) || AI_CONFIG_DOC_ID,
+    name,
     enabled: booleanValue(body.enabled, source.enabled),
     requireLogin: booleanValue(body.requireLogin, source.requireLogin),
     provider,
@@ -541,6 +557,8 @@ function maskSecret(value) {
 
 function publicAiConfig(config) {
   return {
+    id: cleanString(config?.id) || AI_CONFIG_DOC_ID,
+    name: cleanString(config?.name) || DEFAULT_AI_CONFIG.name,
     enabled: Boolean(config.enabled),
     requireLogin: config.requireLogin !== false,
     provider: config.provider,
@@ -549,44 +567,229 @@ function publicAiConfig(config) {
     temperature: config.temperature,
     maxTokens: config.maxTokens,
     systemPrompt: config.systemPrompt,
+    isDefault: Boolean(config.isDefault),
+    usage: config.usage || emptyAiUsage(),
     hasApiKey: Boolean(cleanString(config.apiKey)),
     apiKeyMasked: maskSecret(config.apiKey),
+    createdAt: config.createdAt || '',
     updatedAt: config.updatedAt || '',
   };
 }
 
-async function getStoredAiConfig(collection) {
+function emptyAiUsage() {
+  return { calls: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+}
+
+async function getStoredAiConfigs(collection) {
   if (collection) {
-    return collection.findOne({ id: AI_CONFIG_DOC_ID }, { projection: { _id: 0 } });
+    const docs = await collection.find({}).sort({ createdAt: 1 }).toArray();
+    return docs.map((doc) => normalizeAiConfigInput(doc, DEFAULT_AI_CONFIG));
   }
   seedMemoryStore();
-  return memoryStore.aiConfig;
+  if (!Array.isArray(memoryStore.aiConfigs)) memoryStore.aiConfigs = [];
+  if (!memoryStore.aiConfigs.length && memoryStore.aiConfig && typeof memoryStore.aiConfig === 'object') {
+    memoryStore.aiConfigs = [memoryStore.aiConfig];
+  }
+  return memoryStore.aiConfigs.map((item) => normalizeAiConfigInput(item, DEFAULT_AI_CONFIG));
+}
+
+async function getStoredAiConfig(collection) {
+  const list = await getStoredAiConfigs(collection);
+  return list.find((item) => item.id === AI_CONFIG_DOC_ID) || list[0] || null;
+}
+
+function pickDefaultAiConfig(configs) {
+  return configs.find((item) => item.isDefault && item.enabled) ||
+    configs.find((item) => item.enabled) ||
+    configs[0] ||
+    null;
+}
+
+async function getEffectiveAiConfigRecord(collection, runtimeConfig) {
+  const runtime = normalizeAiConfigInput(aiRuntimeConfig(runtimeConfig), DEFAULT_AI_CONFIG);
+  const storedList = await getStoredAiConfigs(collection);
+  const doc = pickDefaultAiConfig(storedList);
+  if (!doc) return { config: runtime, doc: null };
+  const config = normalizeAiConfigInput(doc, { ...runtime, apiKey: doc.apiKey || '' });
+  return { config, doc };
 }
 
 async function getEffectiveAiConfig(collection, runtimeConfig) {
-  const runtime = normalizeAiConfigInput(aiRuntimeConfig(runtimeConfig), DEFAULT_AI_CONFIG);
-  const stored = await getStoredAiConfig(collection);
-  return normalizeAiConfigInput(stored || {}, runtime);
+  const { config } = await getEffectiveAiConfigRecord(collection, runtimeConfig);
+  return config;
 }
 
-async function updateAiConfig(collection, body, runtimeConfig) {
-  const stored = await getStoredAiConfig(collection);
-  const runtime = normalizeAiConfigInput(aiRuntimeConfig(runtimeConfig), DEFAULT_AI_CONFIG);
-  const currentStored = stored ? normalizeAiConfigInput(stored, { ...runtime, apiKey: stored.apiKey || '' }) : { ...runtime, apiKey: '' };
-  const now = new Date().toISOString();
-  const config = { ...normalizeAiConfigInput(body, currentStored), updatedAt: now };
+async function listAiConfigs(collection) {
+  const storedList = await getStoredAiConfigs(collection);
+  const { doc } = await getEffectiveAiConfigRecord(collection, {});
+  return {
+    aiConfigs: storedList.map((item) => publicAiConfig(item)),
+    effectiveId: doc ? doc.id : '',
+  };
+}
 
+async function saveAiConfig(collection, config, now) {
   if (collection) {
     await collection.updateOne(
-      { id: AI_CONFIG_DOC_ID },
+      { id: config.id },
       { $set: config, $setOnInsert: { createdAt: now } },
       { upsert: true }
     );
   } else {
-    memoryStore.aiConfig = { ...config, createdAt: memoryStore.aiConfig?.createdAt || now };
+    const index = memoryStore.aiConfigs.findIndex((item) => item.id === config.id);
+    if (index >= 0) memoryStore.aiConfigs[index] = { ...config, createdAt: memoryStore.aiConfigs[index].createdAt || now };
+    else memoryStore.aiConfigs.push({ ...config, createdAt: now });
+    memoryStore.aiConfig = config;
   }
+}
 
-  return { aiConfig: publicAiConfig(await getEffectiveAiConfig(collection, runtimeConfig)) };
+async function updateAiConfig(collection, body, runtimeConfig) {
+  const storedList = await getStoredAiConfigs(collection);
+  const runtime = normalizeAiConfigInput(aiRuntimeConfig(runtimeConfig), DEFAULT_AI_CONFIG);
+  const targetId = cleanString(body.id) || AI_CONFIG_DOC_ID;
+  const target = storedList.find((item) => item.id === targetId) || storedList.find((item) => item.isDefault) || storedList[0] || null;
+  const current = target
+    ? normalizeAiConfigInput(target, { ...runtime, apiKey: target.apiKey || '' })
+    : { ...runtime, apiKey: '' };
+  const now = new Date().toISOString();
+  const config = {
+    ...normalizeAiConfigInput({ ...body, id: targetId }, current),
+    updatedAt: now,
+    isDefault: booleanValue(body.isDefault, target?.isDefault ?? false),
+  };
+
+  await saveAiConfig(collection, config, now);
+
+  const list = await listAiConfigs(collection);
+  return {
+    aiConfig: publicAiConfig(await getEffectiveAiConfig(collection, runtimeConfig)),
+    aiConfigs: list.aiConfigs,
+  };
+}
+
+async function createAiConfig(collection, body, runtimeConfig) {
+  const storedList = await getStoredAiConfigs(collection);
+  const now = new Date().toISOString();
+  const id = cleanString(body.id) || crypto.randomUUID();
+  if (storedList.some((item) => item.id === id)) throw new HttpError(409, 'AI 配置标识已存在。');
+  const config = {
+    ...normalizeAiConfigInput({ ...body, id }, DEFAULT_AI_CONFIG),
+    isDefault: booleanValue(body.isDefault, storedList.length === 0),
+    usage: emptyAiUsage(),
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  await saveAiConfig(collection, config, now);
+  if (config.isDefault) await setDefaultAiConfig(collection, { id });
+
+  const list = await listAiConfigs(collection);
+  return { aiConfig: publicAiConfig(config), aiConfigs: list.aiConfigs };
+}
+
+async function deleteAiConfig(collection, body) {
+  const id = cleanString(body.id);
+  const storedList = await getStoredAiConfigs(collection);
+  if (!storedList.some((item) => item.id === id)) throw new HttpError(404, 'AI 配置不存在。');
+  if (collection) {
+    await collection.deleteOne({ id });
+  } else {
+    const index = memoryStore.aiConfigs.findIndex((item) => item.id === id);
+    if (index >= 0) memoryStore.aiConfigs.splice(index, 1);
+    if (memoryStore.aiConfig && memoryStore.aiConfig.id === id) memoryStore.aiConfig = null;
+  }
+  // 删除后确保仍有默认配置
+  const remaining = await getStoredAiConfigs(collection);
+  if (!pickDefaultAiConfig(remaining) && remaining.length) {
+    await setDefaultAiConfig(collection, { id: remaining[0].id });
+  }
+  return { deleted: true, aiConfigs: (await listAiConfigs(collection)).aiConfigs };
+}
+
+async function setDefaultAiConfig(collection, body) {
+  const id = cleanString(body.id);
+  const storedList = await getStoredAiConfigs(collection);
+  if (!storedList.some((item) => item.id === id)) throw new HttpError(404, 'AI 配置不存在。');
+  const now = new Date().toISOString();
+  if (collection) {
+    await collection.updateMany({}, { $set: { isDefault: false } });
+    await collection.updateOne({ id }, { $set: { isDefault: true, updatedAt: now } });
+  } else {
+    for (const item of memoryStore.aiConfigs) {
+      item.isDefault = item.id === id;
+      item.updatedAt = now;
+    }
+    memoryStore.aiConfig = memoryStore.aiConfigs.find((item) => item.id === id) || memoryStore.aiConfig;
+  }
+  return { ok: true, aiConfigs: (await listAiConfigs(collection)).aiConfigs };
+}
+
+async function testAiConfig(collection, body, runtimeConfig) {
+  const storedList = await getStoredAiConfigs(collection);
+  const targetId = cleanString(body.id);
+  const target = storedList.find((item) => item.id === targetId) || storedList.find((item) => item.isDefault) || storedList[0] || null;
+  const runtime = normalizeAiConfigInput(aiRuntimeConfig(runtimeConfig), DEFAULT_AI_CONFIG);
+  const config = target ? normalizeAiConfigInput(target, { ...runtime, apiKey: target.apiKey || '' }) : runtime;
+  if (!config.apiKey) return { ok: false, message: '该配置还没有填写 API Key。' };
+
+  const startedAt = Date.now();
+  try {
+    const response = await fetch(config.apiBaseUrl, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${config.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: config.model,
+        messages: [{ role: 'user', content: 'ping' }],
+        temperature: config.temperature,
+        max_tokens: 4,
+      }),
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      const detail = cleanString(payload.error?.message || payload.message || payload.error);
+      return { ok: false, message: detail || `接口返回 HTTP ${response.status}` };
+    }
+    return { ok: true, message: '连接正常', latencyMs: Date.now() - startedAt, model: config.model };
+  } catch (error) {
+    return { ok: false, message: '连接失败，请检查接口地址或网络。' };
+  }
+}
+
+async function recordAiUsage(collection, configId, usage) {
+  if (!configId) return;
+  const counts = {
+    calls: 1,
+    promptTokens: positiveInteger(usage?.prompt_tokens ?? usage?.promptTokens ?? 0),
+    completionTokens: positiveInteger(usage?.completion_tokens ?? usage?.completionTokens ?? 0),
+    totalTokens: positiveInteger(usage?.total_tokens ?? usage?.totalTokens ?? 0),
+  };
+  if (collection) {
+    await collection.updateOne(
+      { id: configId },
+      {
+        $inc: {
+          'usage.calls': counts.calls,
+          'usage.promptTokens': counts.promptTokens,
+          'usage.completionTokens': counts.completionTokens,
+          'usage.totalTokens': counts.totalTokens,
+        },
+      }
+    );
+  } else {
+    const target = memoryStore.aiConfigs.find((item) => item.id === configId);
+    if (target) {
+      const usageData = target.usage || emptyAiUsage();
+      target.usage = {
+        calls: (usageData.calls || 0) + counts.calls,
+        promptTokens: (usageData.promptTokens || 0) + counts.promptTokens,
+        completionTokens: (usageData.completionTokens || 0) + counts.completionTokens,
+        totalTokens: (usageData.totalTokens || 0) + counts.totalTokens,
+      };
+    }
+  }
 }
 
 function aiMode(value) {
@@ -638,7 +841,7 @@ function extractAiText(payload) {
     .trim();
 }
 
-async function requestAiComment(config, body, user) {
+async function requestAiComment(config, body, user, usageDocId, collection) {
   if (!config.enabled) throw new HttpError(403, 'AI 评论功能已关闭。');
   if (!config.apiKey) throw new HttpError(500, 'AI 评论 API Key 未配置，请到用户中心管理页配置。');
 
@@ -675,6 +878,8 @@ async function requestAiComment(config, body, user) {
 
   const comment = extractAiText(payload);
   if (!comment) throw new HttpError(502, 'AI 评论接口没有返回可用内容。');
+  // 记录调用次数与 Token 用量
+  await recordAiUsage(collection, usageDocId, payload.usage);
   return {
     comment: comment.slice(0, 500),
     mode,
@@ -1211,7 +1416,14 @@ async function countCommentsForUser(commentCollection, user) {
   if (!commentCollection || !user) return positiveInteger(user?.commentExperience || user?.commentCount || 0);
   const clauses = commentOwnerClauses(user);
   if (!clauses.length) return 0;
-  return commentCollection.countDocuments({ $or: clauses });
+  // 只统计用户自己发表的主评论（不含回复），与"两层扁平"评论规则一致
+  const mainCommentCondition = {
+    $or: [
+      { rid: { $in: ['', null] } },
+      { rid: { $exists: false } },
+    ],
+  };
+  return commentCollection.countDocuments({ $and: [{ $or: clauses }, mainCommentCondition] });
 }
 
 async function refreshUserCommentStats(userCollection, commentCollection, user, minimumExperience = 0) {
@@ -1497,6 +1709,8 @@ async function registerUser(collection, body) {
     badgeColor: role === 'admin' ? DEFAULT_ADMIN_BADGE_COLOR : '',
     status: 'active',
     notifications: defaultNotifications(),
+    // 第三方登录预留字段（GitHub / Google / QQ 等，暂未接入）
+    oauthProviders: [],
     createdAt: now,
     updatedAt: now,
     ...passwordFields,
@@ -1660,6 +1874,9 @@ function verificationPurposeMeta(purpose) {
   }
   if (value === 'changeemail' || value === 'change_email') {
     return { purpose: 'changeEmail', label: '修改邮箱验证码', intro: '修改你的评论账号邮箱' };
+  }
+  if (value === 'changeemailold' || value === 'change_email_old') {
+    return { purpose: 'changeEmailOld', label: '旧邮箱验证码', intro: '确认当前账号身份' };
   }
   if (value === 'reset') {
     return { purpose: 'reset', label: '重置密码验证码', intro: '重置你的评论账号密码' };
@@ -1851,6 +2068,8 @@ async function verifyLoginCode(userCollection, codeCollection, body) {
       badgeColor: role === 'admin' ? DEFAULT_ADMIN_BADGE_COLOR : '',
       status: 'active',
       notifications: defaultNotifications(),
+      // 第三方登录预留字段（GitHub / Google / QQ 等，暂未接入）
+      oauthProviders: [],
       createdAt: now,
       updatedAt: now,
       ...hashPassword(crypto.randomUUID()),
@@ -1965,10 +2184,11 @@ async function updateUser(collection, id, updates) {
   }
 
   if (collection) {
+    // 注意：mongodb driver v6 已移除 includeResultMetadata，直接返回文档本身
     const result = await collection.findOneAndUpdate(
       { id },
       { $set: updates },
-      { returnDocument: 'after', includeResultMetadata: false, projection: { _id: 0, passwordHash: 0, salt: 0 } }
+      { returnDocument: 'after', projection: { _id: 0, passwordHash: 0, salt: 0 } }
     );
     const updatedUser = result?.value || result;
     if (!updatedUser) throw new HttpError(404, '用户不存在。');
@@ -2022,6 +2242,7 @@ async function redeemReward(collection, shopCollection, req, body) {
   const user = await requireSessionUser(collection, req, body);
   const item = await findShopItem(shopCollection, body.reward || body.item || body.type || body.key);
   const phone = validatePhone(body.phone);
+  const note = cleanString(body.note).slice(0, 200); // 兑换备注（可选）
   if (item.stock <= 0) throw new HttpError(400, '这个商品已经兑完了。');
 
   const stats = userLevelStats(user);
@@ -2036,6 +2257,7 @@ async function redeemReward(collection, shopCollection, req, body) {
     itemLabel: item.name || item.label,
     cost: item.price,
     phone,
+    note,
     status: 'pending',
     createdAt: now,
     updatedAt: now,
@@ -2115,6 +2337,12 @@ async function changeEmail(collection, codeCollection, req, body) {
 
   const existing = await findUserByEmail(collection, emailLower);
   if (existing && existing.id !== user.id) throw new HttpError(409, '这个邮箱已经注册，请换一个邮箱。');
+
+  // 双验证：先用旧邮箱验证码确认身份，再验证新邮箱验证码（兼容旧前端：未传 oldCode 时跳过旧邮箱验证）
+  const oldCode = cleanString(body.oldCode);
+  if (oldCode) {
+    await consumeVerificationCode(codeCollection, { email: normalizeEmail(user.email), code: oldCode }, 'changeEmailOld');
+  }
   await consumeVerificationCode(codeCollection, { ...body, email: emailLower }, 'changeEmail');
 
   const oldEmail = normalizeEmail(user.email);
@@ -2146,8 +2374,8 @@ async function deleteAccount(collection, req, body) {
 
   await sendAccountNoticeMail(
     normalizeEmail(user.email),
-    '账号已注销',
-    '你的评论账号刚刚被注销，账号积分和兑换资格已经全部作废。'
+    '注销申请已提交',
+    '我们已收到你的账号注销申请，账号即将被注销，账号积分和兑换资格将全部作废。'
   );
 
   return deleteUser(collection, user.id);
@@ -2589,9 +2817,10 @@ async function handle(req, res) {
   }
 
   if (action === 'aiComment' && req.method === 'POST') {
-    const aiConfig = await getEffectiveAiConfig(aiConfigCollection, runtimeConfig);
+    const record = await getEffectiveAiConfigRecord(aiConfigCollection, runtimeConfig);
+    const aiConfig = record.config;
     const user = aiConfig.requireLogin ? await requireSessionUser(collection, req, body) : null;
-    send(res, 200, { ok: true, ...(await requestAiComment(aiConfig, body, user)) });
+    send(res, 200, { ok: true, ...(await requestAiComment(aiConfig, body, user, record.doc?.id, aiConfigCollection)) });
     return;
   }
 
@@ -2653,7 +2882,38 @@ async function handle(req, res) {
       send(res, 200, { ok: true, ...(await updateAiConfig(aiConfigCollection, body, runtimeConfig)) });
       return;
     }
-    send(res, 200, { ok: true, aiConfig: publicAiConfig(await getEffectiveAiConfig(aiConfigCollection, runtimeConfig)) });
+    const effective = await getEffectiveAiConfig(aiConfigCollection, runtimeConfig);
+    send(res, 200, { ok: true, aiConfig: publicAiConfig(effective), ...(await listAiConfigs(aiConfigCollection)) });
+    return;
+  }
+
+  if (action === 'listAiConfigs' && req.method === 'GET') {
+    await authorizeAdmin(collection, req, body, url);
+    send(res, 200, { ok: true, ...(await listAiConfigs(aiConfigCollection)) });
+    return;
+  }
+
+  if (action === 'createAiConfig' && req.method === 'POST') {
+    await authorizeAdmin(collection, req, body, url);
+    send(res, 201, { ok: true, ...(await createAiConfig(aiConfigCollection, body, runtimeConfig)) });
+    return;
+  }
+
+  if (action === 'deleteAiConfig' && req.method === 'POST') {
+    await authorizeAdmin(collection, req, body, url);
+    send(res, 200, { ok: true, ...(await deleteAiConfig(aiConfigCollection, body)) });
+    return;
+  }
+
+  if (action === 'setDefaultAiConfig' && req.method === 'POST') {
+    await authorizeAdmin(collection, req, body, url);
+    send(res, 200, { ok: true, ...(await setDefaultAiConfig(aiConfigCollection, body)) });
+    return;
+  }
+
+  if (action === 'testAiConfig' && req.method === 'POST') {
+    await authorizeAdmin(collection, req, body, url);
+    send(res, 200, { ok: true, ...(await testAiConfig(aiConfigCollection, body, runtimeConfig)) });
     return;
   }
 
@@ -2735,6 +2995,102 @@ async function handle(req, res) {
   throw new HttpError(404, '未知的用户中心 API 操作。');
 }
 
+// ===== 评论层：两层扁平结构 + AI 辅助生成标记 + 主评论级联删除 =====
+async function commentLayerCommentCollection() {
+  try {
+    return await getCommentCollection();
+  } catch (error) {
+    return null;
+  }
+}
+
+async function applyCommentLayer(event, body, payload) {
+  if (!payload || typeof payload !== 'object') return payload;
+
+  if (event === 'COMMENT_GET' && Array.isArray(payload.data)) {
+    // 1) 扁平化：所有回复一律挂在所属主评论下（pid → rid），避免出现第三层嵌套
+    for (const main of payload.data) {
+      if (Array.isArray(main && main.replies)) {
+        for (const reply of main.replies) {
+          if (reply && reply.rid) reply.pid = reply.rid;
+        }
+      }
+    }
+
+    // 2) 补充 AI 辅助生成标记（前端在设备信息旁显示"由 AI 辅助生成"）
+    const ids = new Set();
+    for (const main of payload.data) {
+      if (main && main.id) ids.add(String(main.id));
+      if (Array.isArray(main && main.replies)) {
+        for (const reply of main.replies) {
+          if (reply && reply.id) ids.add(String(reply.id));
+        }
+      }
+    }
+    if (ids.size) {
+      const commentCollection = await commentLayerCommentCollection();
+      if (commentCollection) {
+        try {
+          const objectIds = [...ids].map(objectIdCandidate).filter(Boolean);
+          const match = [];
+          if (objectIds.length) match.push({ _id: { $in: objectIds } });
+          match.push({ _id: { $in: [...ids] } });
+          const docs = await commentCollection
+            .find({ $or: match, aiAssisted: true }, { projection: { _id: 1 } })
+            .toArray();
+          const assisted = new Set(docs.map((doc) => String(doc._id)));
+          const mark = (item) => {
+            if (item && assisted.has(String(item.id))) item.aiAssisted = true;
+          };
+          for (const main of payload.data) {
+            mark(main);
+            if (Array.isArray(main && main.replies)) main.replies.forEach(mark);
+          }
+        } catch (error) {
+          // 补充标记失败不影响评论主流程
+        }
+      }
+    }
+    return payload;
+  }
+
+  if (event === 'COMMENT_SUBMIT') {
+    // 提交 AI 辅助生成的评论时，为其写入 aiAssisted 标记
+    if (payload && payload.id && body && body.aiAssisted) {
+      const commentCollection = await commentLayerCommentCollection();
+      if (commentCollection) {
+        try {
+          const id = String(payload.id);
+          const objectId = objectIdCandidate(id);
+          const match = objectId ? { $or: [{ _id: objectId }, { _id: id }] } : { _id: id };
+          await commentCollection.updateOne(match, { $set: { aiAssisted: true } });
+        } catch (error) {
+          // 写入失败不影响评论主流程
+        }
+      }
+    }
+    return payload;
+  }
+
+  if ((event === 'COMMENT_DELETE_FOR_ADMIN' || event === 'COMMENT_DELETE_FOR_USER') && body && body.id) {
+    // 删除主评论时，级联删除其下所有回复（对子评论删除无副作用）
+    const id = cleanString(body.id);
+    if (id) {
+      const commentCollection = await commentLayerCommentCollection();
+      if (commentCollection) {
+        try {
+          await commentCollection.deleteMany({ rid: id });
+        } catch (error) {
+          // 级联删除失败不影响评论主流程
+        }
+      }
+    }
+    return payload;
+  }
+
+  return payload;
+}
+
 module.exports = async function demoUsersApi(req, res) {
   setCorsHeaders(req, res);
 
@@ -2749,3 +3105,5 @@ module.exports = async function demoUsersApi(req, res) {
     });
   }
 };
+
+module.exports.applyCommentLayer = applyCommentLayer;

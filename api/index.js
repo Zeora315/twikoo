@@ -33,6 +33,80 @@ function sendApiOnlyNotice(res) {
   }));
 }
 
+// 需要应用"评论层"（两层扁平 + AI 标记 + 级联删除）的事件
+const COMMENT_LAYER_EVENTS = new Set([
+  'COMMENT_GET',
+  'COMMENT_SUBMIT',
+  'COMMENT_DELETE_FOR_ADMIN',
+  'COMMENT_DELETE_FOR_USER',
+]);
+
+// 本地/非 Vercel 环境兜底 Express 风格响应方法（Vercel 运行时自带）
+function attachExpressLikeMethods(res) {
+  if (typeof res.status !== 'function') {
+    res.status = function (code) {
+      res.statusCode = code;
+      return res;
+    };
+  }
+  if (typeof res.send !== 'function') {
+    res.send = function (data) {
+      if (typeof data === 'object' && data !== null) return res.json(data);
+      return res.end(String(data));
+    };
+  }
+  if (typeof res.json !== 'function') {
+    res.json = function (data) {
+      if (!res.getHeader('content-type')) {
+        res.setHeader('content-type', 'application/json; charset=utf-8');
+      }
+      return res.end(JSON.stringify(data));
+    };
+  }
+  return res;
+}
+
+async function twikooVercelWithCommentLayer(req, res) {
+  attachExpressLikeMethods(res);
+
+  const event = (req.body || {}).event;
+  if (!COMMENT_LAYER_EVENTS.has(event)) {
+    return twikooVercel(req, res);
+  }
+
+  // 捕获 twikooVercel 写入的响应体，稍后做评论层转换再真正发送
+  let captured = '';
+  const originalEnd = res.end.bind(res);
+  res.end = function (chunk) {
+    if (chunk !== undefined && chunk !== null) captured += chunk.toString();
+    return this;
+  };
+
+  try {
+    await twikooVercel(req, res);
+  } catch (error) {
+    res.end = originalEnd;
+    throw error;
+  }
+  res.end = originalEnd;
+
+  if (captured) {
+    let payload = null;
+    try {
+      payload = JSON.parse(captured);
+    } catch (error) {
+      // 非 JSON 响应原样返回
+    }
+    if (payload && typeof payload === 'object') {
+      payload = await demoUsersApi.applyCommentLayer(event, req.body || {}, payload) || payload;
+      captured = JSON.stringify(payload);
+    }
+  }
+
+  res.removeHeader('content-length');
+  return originalEnd(captured);
+}
+
 module.exports = async function twikooWithDemo(req, res) {
   const pathname = getRequestUrl(req).pathname;
 
@@ -52,6 +126,6 @@ module.exports = async function twikooWithDemo(req, res) {
     return sendApiOnlyNotice(res);
   }
 
-  // 其余全部交给官方 twikoo-vercel 处理评论 API
-  return twikooVercel(req, res);
+  // 评论 API：先经过评论层包装，再交给官方 twikoo-vercel
+  return twikooVercelWithCommentLayer(req, res);
 };
