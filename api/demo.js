@@ -588,6 +588,20 @@ function aiReplyHtml(value) {
   return `<p>${escapeHtml(text).replace(/\n{2,}/g, '</p><p>').replace(/\n/g, '<br>')}\u2063\u200B\u2062\u200C\u2063</p>`;
 }
 
+function appendAiReplyMeta(commentHtml, mentionSkill) {
+  if (!mentionSkill || !commentHtml) return commentHtml;
+  const meta = [
+    '<span class="zca-ai-agent-meta"',
+    ' data-zca-ai-agent-meta="true"',
+    ` data-agent-key="${escapeHtml(mentionSkill.key)}"`,
+    ` data-agent-name="${escapeHtml(mentionSkill.name)}"`,
+    ` data-agent-avatar="${escapeHtml(mentionSkill.avatarUrl || DEFAULT_AI_MENTION_AVATAR)}"`,
+    ' hidden aria-hidden="true"></span>',
+    `<!-- zca-ai-agent:${escapeHtml(mentionSkill.key)}|${escapeHtml(mentionSkill.name)}|${escapeHtml(mentionSkill.avatarUrl || DEFAULT_AI_MENTION_AVATAR)} -->`,
+  ].join('');
+  return `${commentHtml}${meta}`;
+}
+
 function normalizeAiChatEndpoint(apiBaseUrl) {
   const raw = cleanString(apiBaseUrl || DEFAULT_AI_CONFIG.apiBaseUrl);
   if (!raw) throw new HttpError(400, 'AI 接口地址不能为空。');
@@ -3883,7 +3897,7 @@ async function createAiMentionReply(body, payload) {
     skillKey: mentionSkill.key,
     mention: `@${mentionSkill.name}`,
   }, actor, record.doc?.id, aiConfigCollection);
-  const commentHtml = aiReplyHtml(aiResult.comment);
+  const commentHtml = appendAiReplyMeta(aiReplyHtml(aiResult.comment), mentionSkill);
   if (!commentHtml) return null;
 
   const now = Date.now() + 1;
