@@ -80,7 +80,7 @@ const DEFAULT_AI_PROVIDER_PRESETS = [
     label: '硅基流动',
     provider: '硅基流动',
     apiBaseUrl: 'https://api.siliconflow.cn/v1',
-    models: ['deepseek-ai/DeepSeek-V4-Flash', 'Pro/deepseek-ai/DeepSeek-V4', 'Qwen/Qwen3-32B', 'Qwen/Qwen3-235B-A22B'],
+    models: ['deepseek-ai/DeepSeek-V3.2', 'Pro/deepseek-ai/DeepSeek-V3.2', 'deepseek-ai/DeepSeek-V3.1-Terminus', 'Pro/deepseek-ai/DeepSeek-V3.1-Terminus'],
   },
   {
     key: 'deepseek',
@@ -509,11 +509,6 @@ function normalizeAiMentionSkills(value, fallback = DEFAULT_AI_MENTION_SKILLS) {
     ? Array.isArray(value) ? value : parseAiMentionSkillLines(value)
     : fallback;
   if (!Array.isArray(source)) throw new HttpError(400, 'AI 人物配置格式不正确。');
-  if (explicitValue && source.length === 0) {
-    const fallbackSkills = Array.isArray(fallback) && fallback.length ? fallback : DEFAULT_AI_MENTION_SKILLS;
-    return normalizeAiMentionSkills(fallbackSkills, DEFAULT_AI_MENTION_SKILLS);
-  }
-
   const seen = new Set();
   const skills = source.map((item, index) => {
     const name = cleanString(item?.name || item?.label || item?.title).slice(0, MAX_AI_MENTION_NAME_LENGTH);
@@ -932,9 +927,9 @@ function normalizeKnownAiModel(provider, model) {
     if (modelName === 'deepseek-reasoner') return 'deepseek-v4-pro';
   }
   if (providerName.includes('硅基') || providerName.includes('siliconflow')) {
+    if (['deepseek-ai/DeepSeek-V4-Flash', 'deepseek-ai/DeepSeek-V4', 'deepseek-ai/DeepSeek-R1'].includes(modelName)) return 'deepseek-ai/DeepSeek-V3.2';
+    if (['Pro/deepseek-ai/DeepSeek-V4-Flash', 'Pro/deepseek-ai/DeepSeek-V4', 'Pro/deepseek-ai/DeepSeek-R1'].includes(modelName)) return 'Pro/deepseek-ai/DeepSeek-V3.2';
     if (['Qwen/Qwen3.6-27B', 'Qwen/Qwen3.5-32B'].includes(modelName)) return 'Qwen/Qwen3-32B';
-    if (modelName === 'deepseek-ai/DeepSeek-R1') return 'deepseek-ai/DeepSeek-V4-Flash';
-    if (modelName === 'Pro/deepseek-ai/DeepSeek-R1') return 'Pro/deepseek-ai/DeepSeek-V4';
   }
   return modelName;
 }
