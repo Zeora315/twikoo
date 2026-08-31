@@ -108,10 +108,17 @@ async function twikooVercelWithCommentLayer(req, res) {
 }
 
 module.exports = async function twikooWithDemo(req, res) {
-  const pathname = getRequestUrl(req).pathname;
+  const url = getRequestUrl(req);
+  const pathname = url.pathname;
 
   // 魔改业务 API：用户/积分商城/AI 评论/通知/管理
   if (pathname === '/api/demo' || pathname.startsWith('/api/demo/')) {
+    return demoUsersApi(req, res);
+  }
+
+  // Vercel 已把所有路径重写到 api/index。带 action 的请求都属于
+  // 用户中心/AI 扩展 API，必须先交给 demo 层，避免被 twikoo-vercel 当成普通评论事件。
+  if (url.searchParams.get('action')) {
     return demoUsersApi(req, res);
   }
 

@@ -44,6 +44,11 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (url.pathname === '/api' && url.searchParams.get('action')) {
+    demoApi(req, res);
+    return;
+  }
+
   if (url.pathname === '/api/demo') {
     demoApi(req, res);
     return;
